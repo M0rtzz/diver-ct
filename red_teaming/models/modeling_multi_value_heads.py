@@ -35,7 +35,9 @@ class AutoModelForCausalLMWithValueCostHeads(AutoModelForCausalLMWithValueHead):
         v_head_kwargs, _, _ = self._split_kwargs(kwargs)
         self.c_heads = torch.nn.ModuleDict()
         for cost_module_name in cost_module_names:
-            self.c_heads[cost_module_name] = ValueHead(self.pretrained_model.config, **v_head_kwargs)
+            self.c_heads[cost_module_name] = ValueHead(
+                self.pretrained_model.config, **v_head_kwargs
+            )
 
         self._init_weights(**v_head_kwargs)
 
@@ -89,10 +91,15 @@ class AutoModelForCausalLMWithValueCostHeads(AutoModelForCausalLMWithValueHead):
             kwargs (`dict`, `optional`):
                 Additional keyword arguments, that are passed to the wrapped model.
         """
-        kwargs["output_hidden_states"] = True  # this had already been set in the LORA / PEFT examples
+        kwargs["output_hidden_states"] = (
+            True  # this had already been set in the LORA / PEFT examples
+        )
         kwargs["past_key_values"] = past_key_values
 
-        if self.is_peft_model and self.pretrained_model.active_peft_config.peft_type == "PREFIX_TUNING":
+        if (
+            self.is_peft_model
+            and self.pretrained_model.active_peft_config.peft_type == "PREFIX_TUNING"
+        ):
             kwargs.pop("past_key_values")
 
         base_model_output = self.pretrained_model(
@@ -107,10 +114,13 @@ class AutoModelForCausalLMWithValueCostHeads(AutoModelForCausalLMWithValueHead):
 
         if return_values:
             if last_hidden_state.device != self.v_head.summary.weight.device:
-                last_hidden_state = last_hidden_state.to(self.v_head.summary.weight.device)
+                last_hidden_state = last_hidden_state.to(
+                    self.v_head.summary.weight.device
+                )
             value = self.v_head(last_hidden_state).squeeze(-1)
             costs = {
-                cost_name: c_head(last_hidden_state).squeeze(-1) for cost_name, c_head in self.c_heads.items()
+                cost_name: c_head(last_hidden_state).squeeze(-1)
+                for cost_name, c_head in self.c_heads.items()
             }
         else:
             value, costs = None, None
@@ -127,7 +137,9 @@ class AutoModelForCausalLMWithValueCostHeads(AutoModelForCausalLMWithValueHead):
         to the state dictionary of the wrapped model by prepending the key with `v_head.`.
         """
         if not self.is_peft_model:
-            pretrained_model_state_dict = self.pretrained_model.state_dict(*args, **kwargs)
+            pretrained_model_state_dict = self.pretrained_model.state_dict(
+                *args, **kwargs
+            )
         else:
             # if it is a peft model, only save the v_head
             pretrained_model_state_dict = {}
@@ -158,8 +170,10 @@ class AutoModelForCausalLMWithValueCostHeads(AutoModelForCausalLMWithValueHead):
             if "v_head." in k:
                 state_dict[k.replace("v_head.", "")] = state_dict.pop(k)
             for cost_name, c_head in self.c_heads.items():
-                if cost_name + '.c_head.' in k:
-                    state_dict[k.replace(cost_name + '.c_head.', "")] = state_dict.pop(k)
+                if cost_name + ".c_head." in k:
+                    state_dict[k.replace(cost_name + ".c_head.", "")] = state_dict.pop(
+                        k
+                    )
         self.v_head.load_state_dict(state_dict, strict=False)
         for c_head in self.c_heads.values():
             c_head.load_state_dict(state_dict, strict=False)
@@ -194,13 +208,21 @@ class AutoModelForCausalLMWithValueCostHeads(AutoModelForCausalLMWithValueHead):
             self.is_sequential_parallel = True
 
     @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path, *model_args, cost_module_names: List[str] = [], **kwargs):
+    def from_pretrained(
+        cls,
+        pretrained_model_name_or_path,
+        *model_args,
+        cost_module_names: List[str] = [],
+        **kwargs,
+    ):
         if kwargs is not None:
             peft_config = kwargs.pop("peft_config", None)
             reward_adapter = kwargs.pop("reward_adapter", None)
             reward_adapter_name = kwargs.pop("reward_adapter_name", "reward_adapter")
             is_trainable = kwargs.pop("is_trainable", False)
-            trl_model_args, pretrained_kwargs, peft_quantization_kwargs = cls._split_kwargs(kwargs)
+            trl_model_args, pretrained_kwargs, peft_quantization_kwargs = (
+                cls._split_kwargs(kwargs)
+            )
             token = pretrained_kwargs.get("token", None)
         else:
             peft_config = None
@@ -219,13 +241,27 @@ class AutoModelForCausalLMWithValueCostHeads(AutoModelForCausalLMWithValueHead):
 
         current_device = cls._get_current_device()
         if isinstance(pretrained_model_name_or_path, str):
-            is_loaded_in_8bit = pretrained_kwargs["load_in_8bit"] if "load_in_8bit" in pretrained_kwargs else False
-            is_loaded_in_4bit = pretrained_kwargs["load_in_4bit"] if "load_in_4bit" in pretrained_kwargs else False
+            is_loaded_in_8bit = (
+                pretrained_kwargs["load_in_8bit"]
+                if "load_in_8bit" in pretrained_kwargs
+                else False
+            )
+            is_loaded_in_4bit = (
+                pretrained_kwargs["load_in_4bit"]
+                if "load_in_4bit" in pretrained_kwargs
+                else False
+            )
         else:
-            is_loaded_in_8bit = getattr(pretrained_model_name_or_path, "is_loaded_in_8bit", False)
-            is_loaded_in_4bit = getattr(pretrained_model_name_or_path, "is_loaded_in_4bit", False)
+            is_loaded_in_8bit = getattr(
+                pretrained_model_name_or_path, "is_loaded_in_8bit", False
+            )
+            is_loaded_in_4bit = getattr(
+                pretrained_model_name_or_path, "is_loaded_in_4bit", False
+            )
 
-        if (is_loaded_in_8bit or is_loaded_in_4bit) and "device_map" not in pretrained_kwargs:
+        if (
+            is_loaded_in_8bit or is_loaded_in_4bit
+        ) and "device_map" not in pretrained_kwargs:
             # warn users
             logging.warning(
                 "The `device_map` argument is not provided. We will override the device_map argument."
@@ -235,8 +271,14 @@ class AutoModelForCausalLMWithValueCostHeads(AutoModelForCausalLMWithValueHead):
             )
             pretrained_kwargs["device_map"] = {"": current_device}
 
-        if is_peft_available() and peft_config is not None and not isinstance(peft_config, PeftConfig):
-            raise ValueError("The `peft_config` argument should be an instance of `peft.PeftConfig` class.")
+        if (
+            is_peft_available()
+            and peft_config is not None
+            and not isinstance(peft_config, PeftConfig)
+        ):
+            raise ValueError(
+                "The `peft_config` argument should be an instance of `peft.PeftConfig` class."
+            )
 
         # First, load the pre-trained model using the parent-class
         # either `AutoModelForCausalLM` or `AutoModelForSeq2SeqLM`
@@ -249,14 +291,23 @@ class AutoModelForCausalLMWithValueCostHeads(AutoModelForCausalLMWithValueHead):
                         "adapter_config.json",
                         token=token,
                     )
-                except (EntryNotFoundError, LocalEntryNotFoundError, HFValidationError, RepositoryNotFoundError):
+                except (
+                    EntryNotFoundError,
+                    LocalEntryNotFoundError,
+                    HFValidationError,
+                    RepositoryNotFoundError,
+                ):
                     remote_adapter_config = None
             else:
                 remote_adapter_config = None
 
-            local_adapter_present = os.path.exists(os.path.join(pretrained_model_name_or_path, "adapter_config.json"))
+            local_adapter_present = os.path.exists(
+                os.path.join(pretrained_model_name_or_path, "adapter_config.json")
+            )
 
-            if (local_adapter_present or remote_adapter_config is not None) and is_peft_available():
+            if (
+                local_adapter_present or remote_adapter_config is not None
+            ) and is_peft_available():
                 if peft_config is not None:
                     logging.warning(
                         "`peft_config` argument ignored since a peft config file was found in "
@@ -265,19 +316,27 @@ class AutoModelForCausalLMWithValueCostHeads(AutoModelForCausalLMWithValueHead):
 
                 # Load the trained peft adapter config
                 if local_adapter_present:
-                    trained_adapter_config = PeftConfig.from_pretrained(pretrained_model_name_or_path)
+                    trained_adapter_config = PeftConfig.from_pretrained(
+                        pretrained_model_name_or_path
+                    )
                 else:
                     remote_adapter_dir = os.path.dirname(remote_adapter_config)
-                    trained_adapter_config = PeftConfig.from_pretrained(remote_adapter_dir)
+                    trained_adapter_config = PeftConfig.from_pretrained(
+                        remote_adapter_dir
+                    )
 
                 # Load the pretrained base model
                 pretrained_model = cls.transformers_parent_class.from_pretrained(
-                    trained_adapter_config.base_model_name_or_path, *model_args, **pretrained_kwargs
+                    trained_adapter_config.base_model_name_or_path,
+                    *model_args,
+                    **pretrained_kwargs,
                 )
 
                 # Wrap the pretrained model with the trained peft adapter
                 pretrained_model = PeftModel.from_pretrained(
-                    pretrained_model, pretrained_model_name_or_path, is_trainable=is_trainable
+                    pretrained_model,
+                    pretrained_model_name_or_path,
+                    is_trainable=is_trainable,
                 )
                 logging.info("Trained peft adapter loaded")
             else:
@@ -295,10 +354,14 @@ class AutoModelForCausalLMWithValueCostHeads(AutoModelForCausalLMWithValueHead):
                     pretrained_model = get_peft_model(pretrained_model, peft_config)
                     logging.info("peft adapter initialised")
 
-        elif isinstance(pretrained_model_name_or_path, cls.supported_pretrained_model_architectures):
+        elif isinstance(
+            pretrained_model_name_or_path, cls.supported_pretrained_model_architectures
+        ):
             pretrained_model = pretrained_model_name_or_path
 
-            if peft_config is not None and isinstance(pretrained_model, PreTrainedModel):
+            if peft_config is not None and isinstance(
+                pretrained_model, PreTrainedModel
+            ):
                 # Initialize a new peft adapter with the given config
                 if is_loaded_in_8bit or is_loaded_in_4bit:
                     pretrained_model = prepare_model_for_kbit_training(
@@ -320,7 +383,9 @@ class AutoModelForCausalLMWithValueCostHeads(AutoModelForCausalLMWithValueHead):
                 if hasattr(pretrained_model, "active_peft_config") and isinstance(
                     pretrained_model.active_peft_config, PromptLearningConfig
                 ):
-                    raise ValueError("PromptLearningConfig is not supported for PPO training.")
+                    raise ValueError(
+                        "PromptLearningConfig is not supported for PPO training."
+                    )
 
         # Add reward modeling adapter if specified
         if not is_peft_model and reward_adapter is not None:
@@ -338,31 +403,49 @@ class AutoModelForCausalLMWithValueCostHeads(AutoModelForCausalLMWithValueHead):
             multi_adapter_args = {"supports_rm_adapter": False}
 
         # Then, create the full model by instantiating the wrapper class
-        model = cls(pretrained_model, cost_module_names=cost_module_names, **multi_adapter_args, **trl_model_args)
+        model = cls(
+            pretrained_model,
+            cost_module_names=cost_module_names,
+            **multi_adapter_args,
+            **trl_model_args,
+        )
 
         # if resume_training, load the state_dict again - this is ok since the
         # state_dict is removed from the model after loading it.
         is_resuming_training = True
         if isinstance(pretrained_model_name_or_path, str):
-            safe_filename = os.path.join(pretrained_model_name_or_path, "model.safetensors")
+            safe_filename = os.path.join(
+                pretrained_model_name_or_path, "model.safetensors"
+            )
             filename = os.path.join(pretrained_model_name_or_path, "pytorch_model.bin")
 
-            sharded_index_filename = os.path.join(pretrained_model_name_or_path, "pytorch_model.bin.index.json")
-            safe_sharded_index_filename = os.path.join(pretrained_model_name_or_path, "model.safetensors.index.json")
+            sharded_index_filename = os.path.join(
+                pretrained_model_name_or_path, "pytorch_model.bin.index.json"
+            )
+            safe_sharded_index_filename = os.path.join(
+                pretrained_model_name_or_path, "model.safetensors.index.json"
+            )
             is_sharded = False
             use_safe = os.path.exists(safe_filename)
 
             if not (os.path.exists(filename) or os.path.exists(safe_filename)):
                 # Try with `pytorch_model.bin`
-                filename, files_to_download, is_sharded, is_resuming_training = cls._get_checkpoint_from_hub(
-                    pretrained_model,
-                    pretrained_model_name_or_path,
-                    sharded_index_filename,
-                    token=token,
+                filename, files_to_download, is_sharded, is_resuming_training = (
+                    cls._get_checkpoint_from_hub(
+                        pretrained_model,
+                        pretrained_model_name_or_path,
+                        sharded_index_filename,
+                        token=token,
+                    )
                 )
                 # Try with safetensors
                 if filename is None and files_to_download is None:
-                    safe_filename, files_to_download, is_sharded, is_resuming_training = cls._get_checkpoint_from_hub(
+                    (
+                        safe_filename,
+                        files_to_download,
+                        is_sharded,
+                        is_resuming_training,
+                    ) = cls._get_checkpoint_from_hub(
                         pretrained_model,
                         pretrained_model_name_or_path,
                         safe_sharded_index_filename,
@@ -390,7 +473,9 @@ class AutoModelForCausalLMWithValueCostHeads(AutoModelForCausalLMWithValueHead):
                         )
                         state_dict.update(loading_func(filename, **load_kwargs))
                 else:
-                    state_dict = loading_func(filename if not use_safe else safe_filename, **load_kwargs)
+                    state_dict = loading_func(
+                        filename if not use_safe else safe_filename, **load_kwargs
+                    )
 
         else:
             state_dict = pretrained_model_name_or_path.state_dict()

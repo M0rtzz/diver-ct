@@ -12,8 +12,8 @@ from red_teaming.models.modeling_multi_value_heads import (
     AutoModelForSeq2SeqLMWithValueCostHeads,
 )
 
-
 # Freeze model tools from trlx
+
 
 def rhasattr(obj, attr):
     """A chain-able attribute version of hasattr. For example, to check if
@@ -30,7 +30,7 @@ def rhasattr(obj, attr):
             return False
     return hasattr(_curr_obj, _nested_attrs[-1])
 
-    
+
 def rgetattr(obj, attr: str, *args) -> object:
     """A chain-able attribute version of getattr. For example, to get the
     attribute `foo.bar.baz` from `obj`, you can use:
@@ -49,8 +49,8 @@ def findattr(obj, attrs: Tuple[str]) -> Union[object, None]:
         if rhasattr(obj, attr):
             return rgetattr(obj, attr)
     raise ValueError(f"Could not find an attribute from `{attrs}` in `{obj}`")
-    
-    
+
+
 def hf_get_decoder_blocks(model: nn.Module) -> Tuple[nn.Module]:
     """Returns the decoder hidden layers of the specified model.
     NOTE: Different model configurations have different hidden layer attribute names.
@@ -79,7 +79,10 @@ def freeze_bottom_causal_layers(model: PreTrainedModel, num_layers_unfrozen: int
 
     if num_layers_unfrozen == 0:
         hidden_layers_to_freeze = list(hidden_layers)
-        hidden_layers_to_freeze += [model.get_input_embeddings(), model.get_output_embeddings()]
+        hidden_layers_to_freeze += [
+            model.get_input_embeddings(),
+            model.get_output_embeddings(),
+        ]
     elif num_layers_unfrozen > 0:
         hidden_layers_to_freeze = list(hidden_layers)[:-num_layers_unfrozen]
         hidden_layers_to_freeze += [model.get_input_embeddings()]

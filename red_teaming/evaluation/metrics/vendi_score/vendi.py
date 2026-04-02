@@ -24,7 +24,7 @@ def entropy_q(p, q=1):
         return -(p_ * np.log(p_)).sum()
     if q == "inf":
         return -np.log(np.max(p))
-    return np.log((p_ ** q).sum()) / (1 - q)
+    return np.log((p_**q).sum()) / (1 - q)
 
 
 def score_K(K, q=1, p=None, normalize=False):
@@ -65,7 +65,7 @@ def score(samples, k, q=1, p=None, normalize=False):
 
 
 def intdiv_K(K, q=1, p=None):
-    K_ = K ** q
+    K_ = K**q
     if p is None:
         p = np.ones(K.shape[0]) / K.shape[0]
     return 1 - np.sum(K_ * np.outer(p, p))

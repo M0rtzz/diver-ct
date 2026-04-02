@@ -5,7 +5,7 @@ from abc import abstractmethod
 
 class Metrics:
     def __init__(self):
-        self.name = 'Metric'
+        self.name = "Metric"
 
     def get_name(self):
         return self.name

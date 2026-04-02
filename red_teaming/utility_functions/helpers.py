@@ -15,16 +15,26 @@ class RewardModule:
     team: str = field(default="red", metadata={"help": "The reward team"})
     device: str = field(default="cpu", metadata={"help": "The device to use"})
     clip_value: float = field(default=None, metadata={"help": "The clip value"})
-    is_dynamic: bool = field(default=False, metadata={"help": "Whether the reward is dynamic"})
-    amplitude: float = field(default=1.0, metadata={"help": "The amplitude of the wave"})
-    frequency: float = field(default=0.025, metadata={"help": "The frequency of the wave"})
+    is_dynamic: bool = field(
+        default=False, metadata={"help": "Whether the reward is dynamic"}
+    )
+    amplitude: float = field(
+        default=1.0, metadata={"help": "The amplitude of the wave"}
+    )
+    frequency: float = field(
+        default=0.025, metadata={"help": "The frequency of the wave"}
+    )
     bias: float = field(default=0.5, metadata={"help": "The bias of the wave"})
     scale: float = field(default=1.0, metadata={"help": "The scale of the wave"})
 
     def __call__(self, *args, **kwargs):
         if self.clip_value is None:
             return self.module.get_score(*args, **kwargs)
-        return torch.clamp(self.module.get_score(*args, **kwargs), min=-self.clip_value, max=self.clip_value)
+        return torch.clamp(
+            self.module.get_score(*args, **kwargs),
+            min=-self.clip_value,
+            max=self.clip_value,
+        )
 
     def __post_init__(self):
         if self.is_dynamic:
@@ -33,7 +43,9 @@ class RewardModule:
     @property
     def coef(self):
         if self.is_dynamic:
-            coef = (self.amplitude * np.sin(self.frequency * self.counter) + self.bias) * self.scale
+            coef = (
+                self.amplitude * np.sin(self.frequency * self.counter) + self.bias
+            ) * self.scale
             self.counter += 1
             return coef
         return self._coef
@@ -62,13 +74,19 @@ class CostModule:
     team: str
     clip_value: float = field(default=None, metadata={"help": "The clip value"})
     device: str = field(default="cpu", metadata={"help": "The device to use"})
-    transform: Callable = field(default=lambda x: -x, metadata={"help": "The transform function"})
+    transform: Callable = field(
+        default=lambda x: -x, metadata={"help": "The transform function"}
+    )
 
     def __call__(self, *args, **kwargs):
         if self.clip_value is None:
             return self.transform(self.module.get_score(*args, **kwargs))
         return self.transform(
-            np.clip(self.module.get_score(*args, **kwargs), -self.clip_value, self.clip_value)
+            np.clip(
+                self.module.get_score(*args, **kwargs),
+                -self.clip_value,
+                self.clip_value,
+            )
         )
 
     def to_dict(self):
@@ -82,16 +100,18 @@ class CostModule:
         }
 
 
-def get_utility_modules(utility_module_config: dataclass, device: str, utility_type: str) -> List[Union[RewardModule, CostModule]]:
+def get_utility_modules(
+    utility_module_config: dataclass, device: str, utility_type: str
+) -> List[Union[RewardModule, CostModule]]:
     utility_modules = []
     for utility_name, utility_dict in utility_module_config.to_dict().items():
         if utility_dict is None:
             continue
         utility_fn = eval(utility_dict.module)(**utility_dict.kwargs)
-        if hasattr(utility_fn, 'model'):
+        if hasattr(utility_fn, "model"):
             utility_fn.model.to(device)
             utility_fn.model.eval()
-        if utility_type == 'reward':
+        if utility_type == "reward":
             reward_kwrags = dict(
                 module=utility_fn,
                 name=utility_name,
@@ -101,7 +121,7 @@ def get_utility_modules(utility_module_config: dataclass, device: str, utility_t
                 clip_value=utility_dict.clip_value,
             )
             # Add dynamic reward parameters
-            if hasattr(utility_dict, 'is_dynamic'):
+            if hasattr(utility_dict, "is_dynamic"):
                 reward_kwrags.update(
                     dict(
                         is_dynamic=utility_dict.is_dynamic,
@@ -112,17 +132,17 @@ def get_utility_modules(utility_module_config: dataclass, device: str, utility_t
                     )
                 )
             else:
-                reward_kwrags['is_dynamic'] = False
+                reward_kwrags["is_dynamic"] = False
             utility = RewardModule(**reward_kwrags)
-        elif utility_type == 'cost':
+        elif utility_type == "cost":
             utility = CostModule(
-                    module=utility_fn,
-                    name=utility_name,
-                    constraint=utility_dict.threshold,
-                    team=utility_dict.team,
-                    device=device,
-                    transform=utility_dict.transformation,
-                )
+                module=utility_fn,
+                name=utility_name,
+                constraint=utility_dict.threshold,
+                team=utility_dict.team,
+                device=device,
+                transform=utility_dict.transformation,
+            )
         else:
             raise ValueError(f"Utility type {utility_type} not recognized")
         utility_modules.append(utility)

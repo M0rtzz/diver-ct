@@ -16,6 +16,7 @@ class Observations:
     """
     Observation class for the BlueTeam environment.
     """
+
     red_prompts: "torch.Tensor"
     blue_responses: "torch.Tensor"
     decoded_prompts: "torch.Tensor"
@@ -26,10 +27,7 @@ class Observations:
     gibberishs: "torch.Tensor"
     iterations: "torch.Tensor"
     costs: "torch.Tensor" = field(
-        default=None,
-        metadata={
-            "help": "The costs for the red team."
-        }
+        default=None, metadata={"help": "The costs for the red team."}
     )
 
     def to_dict(self) -> "Dict[str, torch.Tensor]":
@@ -64,15 +62,13 @@ class Step:
         done (bool): Indicates if the episode is done.
         info (Dict[str, torch.Tensor]): Additional information about the step.
     """
+
     rewards: "torch.Tensor"
     observations: "Observations"
     done: "bool"
     info: "Dict[str, torch.Tensor]"
     costs: "torch.Tensor" = field(
-        default=None,
-        metadata={
-            "help": "The costs for the red team."
-        }
+        default=None, metadata={"help": "The costs for the red team."}
     )
 
 
@@ -96,7 +92,9 @@ class BlueTeamEnvironment(gym.Env):
     def max_steps(self) -> "int":
         return self._max_steps
 
-    def get_red_blue_team_generations(self, queries: "torch.Tensor", responses: "torch.Tensor") -> "Tuple[List[str], List[str]]":
+    def get_red_blue_team_generations(
+        self, queries: "torch.Tensor", responses: "torch.Tensor"
+    ) -> "Tuple[List[str], List[str]]":
         """
         Gets the red and blue team generations.
 
@@ -108,14 +106,17 @@ class BlueTeamEnvironment(gym.Env):
             Tuple[List[str], List[str]]: A tuple containing the red and blue team generations.
         """
         # note that red responses are the queries for the blue team
-        blue_queries, red_queries = self._decode_red_team_generations(queries, responses)
+        blue_queries, red_queries = self._decode_red_team_generations(
+            queries, responses
+        )
         attack_batch: Dict[str, torch.Tensor] = {
-            k: v.to(self.accelerator.device) for k, v in self._get_blue_batch(blue_queries).items()
+            k: v.to(self.accelerator.device)
+            for k, v in self._get_blue_batch(blue_queries).items()
         }
         with torch.no_grad():
             attacked_seq = self.accelerator.unwrap_model(self.model).generate(
-                input_ids=attack_batch['input_ids'],
-                attention_mask=attack_batch['attention_mask'],
+                input_ids=attack_batch["input_ids"],
+                attention_mask=attack_batch["attention_mask"],
                 generation_config=self.generation_kwargs,
                 synced_gpus=True,
             )
@@ -123,15 +124,20 @@ class BlueTeamEnvironment(gym.Env):
             attacked_seq, skip_special_tokens=True
         )
         # system prompt,
-        prompt_lens: List[int] = [len(text) + self.system_message_length for text in blue_queries]
-        blue_responses: List[str] = [text[prompt_len:].strip() for text, prompt_len in zip(attacked_generated, prompt_lens)]
+        prompt_lens: List[int] = [
+            len(text) + self.system_message_length for text in blue_queries
+        ]
+        blue_responses: List[str] = [
+            text[prompt_len:].strip()
+            for text, prompt_len in zip(attacked_generated, prompt_lens)
+        ]
         return blue_queries, blue_responses, red_queries
 
     def _get_reward(
-            self,
-            red_texts: "List[str]",
-            blue_texts: "List[str]",
-        ) -> "Dict[str, torch.Tensor]":
+        self,
+        red_texts: "List[str]",
+        blue_texts: "List[str]",
+    ) -> "Dict[str, torch.Tensor]":
         """
         Calculates the reward for the red team based on the given texts.
 
@@ -144,13 +150,17 @@ class BlueTeamEnvironment(gym.Env):
         """
         reward_dict: Dict[str, torch.Tensor] = {}
         total_reward = None
-        unwrap_model = lambda model: self.accelerator.unwrap_model(model) if hasattr(model.module, 'model') else model
+        unwrap_model = lambda model: (
+            self.accelerator.unwrap_model(model)
+            if hasattr(model.module, "model")
+            else model
+        )
         for reward_module in self.reward_modules.values():
-            if reward_module.team == 'red':
+            if reward_module.team == "red":
                 inputs = (red_texts,)
-            elif reward_module.team == 'blue':
+            elif reward_module.team == "blue":
                 inputs = (blue_texts,)
-            elif reward_module.team == 'both':
+            elif reward_module.team == "both":
                 inputs = (blue_texts, red_texts)
             reward_coef = reward_module.coef
             raw_reward: torch.Tensor = unwrap_model(reward_module)(*inputs)
@@ -164,17 +174,19 @@ class BlueTeamEnvironment(gym.Env):
                 total_reward += individual_reward
 
             # for logging, logging the raw instead of coef * raw
-            reward_dict[f'avg_reward_{reward_module.name}'] = raw_reward.mean()
-            reward_dict[f'reward_{reward_module.name}'] = raw_reward
-            reward_dict[f'{reward_module.name}_coef'] = reward_coef
+            reward_dict[f"avg_reward_{reward_module.name}"] = raw_reward.mean()
+            reward_dict[f"reward_{reward_module.name}"] = raw_reward
+            reward_dict[f"{reward_module.name}_coef"] = reward_coef
 
         # make sure the total reward's mean is each of the reward's sum
         # assert abs(total_reward.mean().item() - sum(reward_dict[f'avg_reward_{reward_fn.name}'] for reward_fn in self.reward_modules.values())) < 1e-3
 
-        self.reward_modules['semantic_diversity'].module.update_references(red_texts, embed=True)
-        self.reward_modules['ngram_diversity'].module.update_references(red_texts)
+        self.reward_modules["semantic_diversity"].module.update_references(
+            red_texts, embed=True
+        )
+        self.reward_modules["ngram_diversity"].module.update_references(red_texts)
 
-        reward_dict['reward'] = [r for r in total_reward]
+        reward_dict["reward"] = [r for r in total_reward]
         return reward_dict
 
     def step(self, prompt: "torch.Tensor", sequence: "torch.Tensor") -> "Step":
@@ -190,19 +202,23 @@ class BlueTeamEnvironment(gym.Env):
         """
         assert self._prepared, "Environment must be prepared before stepping"
         self._iteration += 1
-        red_prompts, blue_responses, decoded_prompts = self.get_red_blue_team_generations(prompt, sequence)
+        red_prompts, blue_responses, decoded_prompts = (
+            self.get_red_blue_team_generations(prompt, sequence)
+        )
         reward_dict = self._get_reward(red_prompts, blue_responses)
-        rewards = reward_dict.pop('reward')
-        iterations = torch.ones(len(prompt)).to(self.accelerator.device) * self.iteration
+        rewards = reward_dict.pop("reward")
+        iterations = (
+            torch.ones(len(prompt)).to(self.accelerator.device) * self.iteration
+        )
         observations = Observations(
             red_prompts=red_prompts,
             blue_responses=blue_responses,
             decoded_prompts=decoded_prompts,
             rewards=rewards,
-            safetys=reward_dict['reward_safety'],
-            semantic_diversitys=reward_dict['reward_semantic_diversity'],
-            n_gram_diversitys=reward_dict['reward_ngram_diversity'],
-            gibberishs=reward_dict['reward_gibberish'],
+            safetys=reward_dict["reward_safety"],
+            semantic_diversitys=reward_dict["reward_semantic_diversity"],
+            n_gram_diversitys=reward_dict["reward_ngram_diversity"],
+            gibberishs=reward_dict["reward_gibberish"],
             iterations=iterations,
         )
         # done in 1 step
@@ -210,10 +226,12 @@ class BlueTeamEnvironment(gym.Env):
             rewards=rewards,
             observations=observations,
             done=True,
-            info={k: v for k, v in reward_dict.items() if 'avg' in k or 'coef' in k},
+            info={k: v for k, v in reward_dict.items() if "avg" in k or "coef" in k},
         )
 
-    def _decode_red_team_generations(self, queries: "torch.Tensor", responses: "torch.Tensor") -> "Tuple[List[str], List[str]]":
+    def _decode_red_team_generations(
+        self, queries: "torch.Tensor", responses: "torch.Tensor"
+    ) -> "Tuple[List[str], List[str]]":
         """
         Decodes the generated sequences from the red team model.
 
@@ -222,11 +240,16 @@ class BlueTeamEnvironment(gym.Env):
             responses (torch.Tensor): The generated responses tensor.
 
         Returns:
-            Tuple[List[str], List[str]]: A tuple containing two lists. The first list contains the decoded generated texts, 
+            Tuple[List[str], List[str]]: A tuple containing two lists. The first list contains the decoded generated texts,
             and the second list contains the decoded prompt texts.
         """
         return (
-            [prompt.strip() for prompt in self.red_tokenizer.batch_decode(responses, skip_special_tokens=True)],
+            [
+                prompt.strip()
+                for prompt in self.red_tokenizer.batch_decode(
+                    responses, skip_special_tokens=True
+                )
+            ],
             self.red_tokenizer.batch_decode(queries, skip_special_tokens=True),
         )
 
@@ -249,9 +272,9 @@ class BlueTeamEnvironment(gym.Env):
         self.blue_tokenizer.pad_token = self.blue_tokenizer.eos_token
         return self.blue_tokenizer(
             conv_texts,
-            padding='longest',
+            padding="longest",
             truncation=False,
-            return_tensors='pt',
+            return_tensors="pt",
         )
 
     def reset(self) -> "Tuple[Union[None, torch.Tensor], bool]":
@@ -299,11 +322,13 @@ class BlueTeamEnvironment(gym.Env):
         self.reward_modules = {}
         for reward_fn in reward_modules:
             deviced_reward_fn = RewardModule(
-                    **reward_fn.to_dict(),
-                    device=self.accelerator.device,
+                **reward_fn.to_dict(),
+                device=self.accelerator.device,
+            )
+            if hasattr(reward_fn.module, "model"):
+                self.reward_modules[reward_fn.name] = self.accelerator.prepare(
+                    deviced_reward_fn
                 )
-            if hasattr(reward_fn.module, 'model'):
-                self.reward_modules[reward_fn.name] = self.accelerator.prepare(deviced_reward_fn)
             else:
                 self.reward_modules[reward_fn.name] = deviced_reward_fn
 
@@ -328,7 +353,7 @@ class BlueTeamEnvironment(gym.Env):
         temp_template.append_message(temp_template.roles[1], None)
         non_special_blue_prompt = self.blue_tokenizer.decode(
             token_ids=self.blue_tokenizer(temp_template.get_prompt()).input_ids,
-            skip_special_tokens=True
+            skip_special_tokens=True,
         )
         self.system_message_length = len(non_special_blue_prompt) - temp_instruction_len
         self.filter_add_threshold = self.config.blue_filter_add_threshold
@@ -336,16 +361,16 @@ class BlueTeamEnvironment(gym.Env):
         self.filter_reverse = self.config.blue_filter_reverse
         self.num_toxic = 0
 
-    def render(self, mode: "str" = 'human') -> str:
+    def render(self, mode: "str" = "human") -> str:
         """
         Renders the environment.
 
         Args:
             mode (str, optional): The rendering mode. Defaults to 'human'.
         """
-        if mode == 'human':
-            return 'I am a blue team environment. I only interact with the red team.'
-        return 'Hello.'
+        if mode == "human":
+            return "I am a blue team environment. I only interact with the red team."
+        return "Hello."
 
     def close(self):
         """
@@ -363,35 +388,43 @@ class BlueTeamEnvironment(gym.Env):
 
 class BlueTeamCostEnvironment(BlueTeamEnvironment):
     def _get_reward_cost(
-            self,
-            red_texts: "List[str]",
-            blue_texts: "List[str]",
-        ) -> "Tuple[Dict[str, torch.Tensor]]":
-        def get_utility(utility: str, utility_modules: Dict[str, Callable]) -> Dict[str, torch.Tensor]:
+        self,
+        red_texts: "List[str]",
+        blue_texts: "List[str]",
+    ) -> "Tuple[Dict[str, torch.Tensor]]":
+        def get_utility(
+            utility: str, utility_modules: Dict[str, Callable]
+        ) -> Dict[str, torch.Tensor]:
             # if no utilities, skip
             if utility_modules == {}:
                 return dict()
-            unwrap_model = lambda model: self.accelerator.unwrap_model(model) if hasattr(model.module, 'model') else model
+            unwrap_model = lambda model: (
+                self.accelerator.unwrap_model(model)
+                if hasattr(model.module, "model")
+                else model
+            )
             total_utility = None
             utility_dict: Dict[str, torch.Tensor] = {}
             for utility_module in utility_modules.values():
-                if utility_module.team == 'red':
+                if utility_module.team == "red":
                     inputs = (red_texts,)
-                elif utility_module.team == 'blue':
+                elif utility_module.team == "blue":
                     inputs = (blue_texts,)
-                elif utility_module.team == 'both':
+                elif utility_module.team == "both":
                     inputs = (blue_texts, red_texts)
-                if utility == 'reward':
+                if utility == "reward":
                     reward_coef = utility_module.coef
                     raw_utility: torch.Tensor = unwrap_model(utility_module)(*inputs)
                     individual_utility: torch.Tensor = reward_coef * raw_utility
-                elif utility == 'cost':
-                    individual_utility: torch.Tensor = unwrap_model(utility_module)(*inputs)
+                elif utility == "cost":
+                    individual_utility: torch.Tensor = unwrap_model(utility_module)(
+                        *inputs
+                    )
                 else:
-                    raise ValueError(f'Invalid utility name: {utility}')
+                    raise ValueError(f"Invalid utility name: {utility}")
                 if individual_utility.device != utility_module.device:
                     individual_utility = individual_utility.to(utility_module.device)
-                if utility == 'reward':
+                if utility == "reward":
                     # If reward is none, initialize it
                     if total_utility is None:
                         total_utility = individual_utility
@@ -399,29 +432,41 @@ class BlueTeamCostEnvironment(BlueTeamEnvironment):
                         total_utility += individual_utility
 
                     # for logging, logging the raw instead of coef * raw
-                    utility_dict[f'avg_{utility}_{utility_module.name}'] = raw_utility.mean()
-                    utility_dict[f'{utility}_{utility_module.name}'] = raw_utility
-                    utility_dict[f'{utility}_coef'] = reward_coef
+                    utility_dict[f"avg_{utility}_{utility_module.name}"] = (
+                        raw_utility.mean()
+                    )
+                    utility_dict[f"{utility}_{utility_module.name}"] = raw_utility
+                    utility_dict[f"{utility}_coef"] = reward_coef
                 # do not combine cost utilities
-                elif utility == 'cost':
-                    utility_dict[f'avg_{utility}_{utility_module.name}'] = individual_utility.mean()
-                    utility_dict[f'{utility}_{utility_module.name}'] = individual_utility
-            if utility == 'reward':
+                elif utility == "cost":
+                    utility_dict[f"avg_{utility}_{utility_module.name}"] = (
+                        individual_utility.mean()
+                    )
+                    utility_dict[f"{utility}_{utility_module.name}"] = (
+                        individual_utility
+                    )
+            if utility == "reward":
                 # make sure the total reward's mean is each of the reward's sum
                 # assert abs(total_utility.mean().item() - sum(utility_dict[f'avg_{utility}_{utility_module.name}'] for utility_module in utility_modules.values())) < 1e-3
                 # trl is expecting a list instead of a tensor
                 utility_dict[utility] = [u for u in total_utility]
-            elif utility == 'cost':
-                utility_dict['cost'] = {}
+            elif utility == "cost":
+                utility_dict["cost"] = {}
                 for utility_module in utility_modules.values():
-                    utility_dict['cost'][f'{utility}_{utility_module.name}'] = [u for u in utility_dict[f'{utility}_{utility_module.name}']]
+                    utility_dict["cost"][f"{utility}_{utility_module.name}"] = [
+                        u for u in utility_dict[f"{utility}_{utility_module.name}"]
+                    ]
             return utility_dict
 
-        reward_dict: Dict[str, torch.Tensor] = get_utility('reward', self.reward_modules)
-        cost_dict: Dict[str, torch.Tensor] = get_utility('cost', self.cost_modules)
+        reward_dict: Dict[str, torch.Tensor] = get_utility(
+            "reward", self.reward_modules
+        )
+        cost_dict: Dict[str, torch.Tensor] = get_utility("cost", self.cost_modules)
 
-        self.reward_modules['semantic_diversity'].module.update_references(red_texts, embed=True)
-        self.reward_modules['ngram_diversity'].module.update_references(red_texts)
+        self.reward_modules["semantic_diversity"].module.update_references(
+            red_texts, embed=True
+        )
+        self.reward_modules["ngram_diversity"].module.update_references(red_texts)
 
         return (reward_dict, cost_dict)
 
@@ -438,25 +483,39 @@ class BlueTeamCostEnvironment(BlueTeamEnvironment):
         """
         assert self._prepared, "Environment must be prepared before stepping"
         self._iteration += 1
-        red_prompts, blue_responses, decoded_prompts = self.get_red_blue_team_generations(prompt, sequence)
+        red_prompts, blue_responses, decoded_prompts = (
+            self.get_red_blue_team_generations(prompt, sequence)
+        )
         reward_dict, cost_dict = self._get_reward_cost(red_prompts, blue_responses)
-        rewards = reward_dict.pop('reward')
-        costs = cost_dict.pop('cost', None)
-        iterations = torch.ones(len(prompt)).to(self.accelerator.device) * self.iteration
+        rewards = reward_dict.pop("reward")
+        costs = cost_dict.pop("cost", None)
+        iterations = (
+            torch.ones(len(prompt)).to(self.accelerator.device) * self.iteration
+        )
         observations = Observations(
             red_prompts=red_prompts,
             blue_responses=blue_responses,
             decoded_prompts=decoded_prompts,
             rewards=rewards,
-            safetys=reward_dict['reward_safety'] if 'cost_safety' not in costs else costs['cost_safety'],
-            semantic_diversitys=reward_dict['reward_semantic_diversity'],
-            n_gram_diversitys=reward_dict['reward_ngram_diversity'],
-            gibberishs=reward_dict['reward_gibberish'] if 'cost_gibberish' not in costs else costs['cost_gibberish'],
+            safetys=(
+                reward_dict["reward_safety"]
+                if "cost_safety" not in costs
+                else costs["cost_safety"]
+            ),
+            semantic_diversitys=reward_dict["reward_semantic_diversity"],
+            n_gram_diversitys=reward_dict["reward_ngram_diversity"],
+            gibberishs=(
+                reward_dict["reward_gibberish"]
+                if "cost_gibberish" not in costs
+                else costs["cost_gibberish"]
+            ),
             iterations=iterations,
             costs=costs,
         )
-        avg_dict = {k: v for k, v in reward_dict.items() if 'avg' in k}
-        avg_dict.update({k: v for k, v in cost_dict.items() if 'avg' in k or 'coef' in k})
+        avg_dict = {k: v for k, v in reward_dict.items() if "avg" in k}
+        avg_dict.update(
+            {k: v for k, v in cost_dict.items() if "avg" in k or "coef" in k}
+        )
         return Step(
             rewards=rewards,
             costs=costs,
@@ -484,14 +543,24 @@ class BlueTeamCostEnvironment(BlueTeamEnvironment):
             dataloader (torch.utils.data.DataLoader): The data loader for the environment.
             reward_modules (List[RewardModule]): The reward modules for the environment.
         """
-        BlueTeamEnvironment.prepare_blue_team(self, accelerator, blue_model, blue_tokenizer, red_tokenizer, dataloader, reward_modules)
+        BlueTeamEnvironment.prepare_blue_team(
+            self,
+            accelerator,
+            blue_model,
+            blue_tokenizer,
+            red_tokenizer,
+            dataloader,
+            reward_modules,
+        )
         self.cost_modules = {}
         for cost_fn in cost_modules:
             deviced_cost_fn = CostModule(
-                    **cost_fn.to_dict(),
-                    device=self.accelerator.device,
+                **cost_fn.to_dict(),
+                device=self.accelerator.device,
+            )
+            if hasattr(cost_fn.module, "model"):
+                self.cost_modules[cost_fn.name] = self.accelerator.prepare(
+                    deviced_cost_fn
                 )
-            if hasattr(cost_fn.module, 'model'):
-                self.cost_modules[cost_fn.name] = self.accelerator.prepare(deviced_cost_fn)
             else:
                 self.cost_modules[cost_fn.name] = deviced_cost_fn

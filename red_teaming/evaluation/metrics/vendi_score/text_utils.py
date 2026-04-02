@@ -90,9 +90,7 @@ def get_embeddings(
 ):
     if device is None:
         device = (
-            torch.device("cuda")
-            if torch.cuda.is_available()
-            else torch.device("cpu")
+            torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         )
     if type(device) == str:
         device = torch.device(device)
@@ -100,7 +98,9 @@ def get_embeddings(
         model = AutoModel.from_pretrained(model_path).eval().to(device)
         tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=True)
     embeddings = []
-    for batch in tqdm(data_utils.to_batches(sents, batch_size), desc="Getting embeddings"):
+    for batch in tqdm(
+        data_utils.to_batches(sents, batch_size), desc="Getting embeddings"
+    ):
         inputs = tokenizer(
             batch,
             return_tensors="pt",
@@ -154,10 +154,7 @@ def single_ngram_diversity(sents, n, tokenizer=None, **kwargs):
 
 def ngram_diversity(sents, ns=[1, 2, 3, 4], tokenizer=None, **kwargs):
     return np.mean(
-        [
-            single_ngram_diversity(sents, n, tokenizer=tokenizer, **kwargs)
-            for n in ns
-        ]
+        [single_ngram_diversity(sents, n, tokenizer=tokenizer, **kwargs) for n in ns]
     )
 
 
@@ -186,10 +183,9 @@ def self_bleu(sents, tokenizer):
     for i in range(len(examples)):
         hyp = examples[i]
         ref = examples[:i] + examples[i + 1 :]
-        scores.append(
-            bleu_score.sentence_bleu(ref, hyp, smoothing_function=smoothing)
-        )
+        scores.append(bleu_score.sentence_bleu(ref, hyp, smoothing_function=smoothing))
     return np.mean(scores)
+
 
 def semantic_diversity(sents, tokenizer):
     examples = [tokenizer(s) for s in sents]
@@ -198,10 +194,9 @@ def semantic_diversity(sents, tokenizer):
     for i in range(len(examples)):
         hyp = examples[i]
         ref = examples[:i] + examples[i + 1 :]
-        scores.append(
-            bleu_score.sentence_bleu(ref, hyp, smoothing_function=smoothing)
-        )
+        scores.append(bleu_score.sentence_bleu(ref, hyp, smoothing_function=smoothing))
     return np.mean(scores)
+
 
 def pairwise_bleu(sents, tokenizer):
     examples = [tokenizer(s) for s in sents]
@@ -214,28 +209,28 @@ def pairwise_bleu(sents, tokenizer):
                 continue
             hyp = examples[i]
             ref = [examples[j]]
-            lst.append(
-                bleu_score.sentence_bleu(ref, hyp, smoothing_function=smoothing)
-            )
+            lst.append(bleu_score.sentence_bleu(ref, hyp, smoothing_function=smoothing))
         scores.append(np.mean(lst))
     return np.mean(scores)
 
 
-def ngram_vendi_score_notworking(sents, ns=[1, 2, 3, 4], tokenizer=None, device='cpu', **kwargs):
-    
+def ngram_vendi_score_notworking(
+    sents, ns=[1, 2, 3, 4], tokenizer=None, device="cpu", **kwargs
+):
+
     final_K = None
     num_chunks = 10  # Define the number of chunks
 
-    pbar = tqdm(len(ns)*num_chunks, desc="Computing ngram for vendi score...")
+    pbar = tqdm(len(ns) * num_chunks, desc="Computing ngram for vendi score...")
     for n in ns:
         X = get_ngrams(sents, n=n, tokenizer=tokenizer)
-        
+
         if issparse(X):
             X = X.toarray()  # Convert sparse matrix to dense
 
         # Convert to tensor, still on CPU
         X = torch.tensor(X, dtype=torch.float32)
-        
+
         # Normalize and compute K = X @ X^T on CPU
         X = torch.nn.functional.normalize(X, p=2, dim=1)
         # remove X from memory
@@ -243,7 +238,7 @@ def ngram_vendi_score_notworking(sents, ns=[1, 2, 3, 4], tokenizer=None, device=
         if final_K is None:
             final_K = K
             pbar.update(num_chunks)
-            
+
         else:
             chunk_size = int(np.ceil(final_K.shape[0] / num_chunks))
 
@@ -252,19 +247,24 @@ def ngram_vendi_score_notworking(sents, ns=[1, 2, 3, 4], tokenizer=None, device=
                 end_idx = min((i + 1) * chunk_size, final_K.shape[0])
                 # sum on gpu and store in final_K
 
-                K_chunk = K[start_idx:end_idx].to(device) + final_K[start_idx:end_idx].to(device)
+                K_chunk = K[start_idx:end_idx].to(device) + final_K[
+                    start_idx:end_idx
+                ].to(device)
                 if n == ns[-1]:
                     K_chunk /= len(ns)
-                final_K[start_idx:end_idx] = K_chunk.to('cpu')
+                final_K[start_idx:end_idx] = K_chunk.to("cpu")
 
                 pbar.update(1)
-        
+
     # Convert the combined final mean matrix back to numpy for vendi scoring
     final_K = final_K.numpy()
 
     return vendi.score_K(final_K)
 
-def ngram_vendi_score_oom(sents, ns=[1, 2, 3, 4], tokenizer=None, device='cpu', **kwargs):
+
+def ngram_vendi_score_oom(
+    sents, ns=[1, 2, 3, 4], tokenizer=None, device="cpu", **kwargs
+):
     Ks = []
     for n in ns:
         X = normalize(get_ngrams(sents, n=n, tokenizer=tokenizer))
@@ -278,6 +278,7 @@ def ngram_vendi_score_oom(sents, ns=[1, 2, 3, 4], tokenizer=None, device='cpu', 
     K_mean_np = K_mean.cpu().numpy()
     return vendi.score_K(K_mean_np)
 
+
 def ngram_vendi_score(sents, ns=[1, 2, 3, 4], tokenizer=None, **kwargs):
     Ks = []
     for n in ns:
@@ -289,7 +290,7 @@ def ngram_vendi_score(sents, ns=[1, 2, 3, 4], tokenizer=None, **kwargs):
     return vendi.score_K(K)
 
 
-def embedding_vendi_score( # Modified to return the model and tokenizer and dot product
+def embedding_vendi_score(  # Modified to return the model and tokenizer and dot product
     sents,
     model=None,
     tokenizer=None,
@@ -308,6 +309,11 @@ def embedding_vendi_score( # Modified to return the model and tokenizer and dot 
     n, d = X.shape
     if n < d:
         vendi_score, embed_matrix = vendi.score_X(X)
-        return vendi_score, embed_matrix, model, tokenizer   #0 is score, 1 is emb_matrix, score_X = score, X @ X.T
+        return (
+            vendi_score,
+            embed_matrix,
+            model,
+            tokenizer,
+        )  # 0 is score, 1 is emb_matrix, score_X = score, X @ X.T
     vendi_score, embed_matrix = vendi.score_dual(X)
     return vendi_score, embed_matrix, model, tokenizer  # score_dual = score, X.T @ X

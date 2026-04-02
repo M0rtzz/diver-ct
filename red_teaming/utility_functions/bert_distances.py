@@ -9,18 +9,24 @@ class metric_names:
     FBD = "FBD"
     EMBD = "EMBD"
 
+
 class BertFeature:
-    def __init__(self, bert_model_dir, model_name='bert-base-uncased'):
-        self.tokenizer = trns.BertTokenizer.from_pretrained(model_name, cache_dir=bert_model_dir)
-        self.model = trns.BertModel.from_pretrained(model_name, cache_dir=bert_model_dir)
+    def __init__(self, bert_model_dir, model_name="bert-base-uncased"):
+        self.tokenizer = trns.BertTokenizer.from_pretrained(
+            model_name, cache_dir=bert_model_dir
+        )
+        self.model = trns.BertModel.from_pretrained(
+            model_name, cache_dir=bert_model_dir
+        )
 
     def get_features(self, sentences):
         if type(sentences) is not list:
             sentences = [sentences]
         res = []
         for sentence in sentences:
-            input_ids = torch.tensor([self.tokenizer.encode(sentence,
-                                                            add_special_tokens=True)])  # Add special tokens takes care of adding [CLS], [SEP], <s>... tokens in the right way for each model.
+            input_ids = torch.tensor(
+                [self.tokenizer.encode(sentence, add_special_tokens=True)]
+            )  # Add special tokens takes care of adding [CLS], [SEP], <s>... tokens in the right way for each model.
             with torch.no_grad():
                 pooler_output = self.model(input_ids)[1]
                 res.append(pooler_output)
@@ -55,15 +61,22 @@ def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
     sigma1 = np.atleast_2d(sigma1)
     sigma2 = np.atleast_2d(sigma2)
 
-    assert mu1.shape == mu2.shape, "Training and test mean vectors have different lengths"
-    assert sigma1.shape == sigma2.shape, "Training and test covariances have different dimensions"
+    assert (
+        mu1.shape == mu2.shape
+    ), "Training and test mean vectors have different lengths"
+    assert (
+        sigma1.shape == sigma2.shape
+    ), "Training and test covariances have different dimensions"
 
     diff = mu1 - mu2
 
     # product might be almost singular
     covmean, _ = linalg.sqrtm(sigma1.dot(sigma2), disp=False)
     if not np.isfinite(covmean).all():
-        msg = "fid calculation produces singular product; adding %s to diagonal of cov estimates" % eps
+        msg = (
+            "fid calculation produces singular product; adding %s to diagonal of cov estimates"
+            % eps
+        )
         print(msg)
         offset = np.eye(sigma1.shape[0]) * eps
         covmean = linalg.sqrtm((sigma1 + offset).dot(sigma2 + offset))
@@ -87,7 +100,9 @@ class FBD:
         self.model_name = model_name
         self.bert_model_dir = bert_model_dir
 
-        self.bert_feature = BertFeature(bert_model_dir=bert_model_dir, model_name=model_name)
+        self.bert_feature = BertFeature(
+            bert_model_dir=bert_model_dir, model_name=model_name
+        )
 
         self.refrence_mu, self.refrence_sigma = self._calculate_statistics(references)
 
@@ -104,7 +119,9 @@ class FBD:
     def get_score(self, sentences):
         # inputs must be list of str
         mu, sigma = self._calculate_statistics(sentences)
-        return calculate_frechet_distance(self.refrence_mu, self.refrence_sigma, mu, sigma)
+        return calculate_frechet_distance(
+            self.refrence_mu, self.refrence_sigma, mu, sigma
+        )
 
 
 class EMBD:
@@ -113,7 +130,9 @@ class EMBD:
         self.model_name = model_name
         self.bert_model_dir = bert_model_dir
 
-        self.bert_feature = BertFeature(bert_model_dir=bert_model_dir, model_name=model_name)
+        self.bert_feature = BertFeature(
+            bert_model_dir=bert_model_dir, model_name=model_name
+        )
 
         self.reference_features = self._get_features(references)  # sample * feature
         assert self.reference_features.shape[0] == len(references)

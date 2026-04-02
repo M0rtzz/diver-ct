@@ -1,3 +1,5 @@
 from red_teaming.trainer.red_teaming_ppo_trainer import RedTeamPPOTrainer
-from red_teaming.trainer.constrained_red_teaming_ppo_trainer import ConstrainedRedTeamingPPOTrainer
+from red_teaming.trainer.constrained_red_teaming_ppo_trainer import (
+    ConstrainedRedTeamingPPOTrainer,
+)
 from red_teaming.trainer.lagrange import LagrangeMultiplier

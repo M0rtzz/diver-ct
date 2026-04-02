@@ -33,7 +33,10 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
     def __init__(self, *args, cost_module_names: List[str] = [], **kwargs):
         super().__init__(*args, **kwargs)
         self.cost_module_names = cost_module_names
-        self.running_costs = {cost_module_name: RunningMoments(self.accelerator) for cost_module_name in cost_module_names}
+        self.running_costs = {
+            cost_module_name: RunningMoments(self.accelerator)
+            for cost_module_name in cost_module_names
+        }
 
     def setup_lagrange(self, trainer_config: "dataclass", blue_config: "dataclass"):
         self.episode_costs = {}
@@ -57,7 +60,9 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
                 is_main_process=self.accelerator.is_main_process,
             )
             self.lagrange_multipliers[cost_name] = lagrange_multiplier
-            self.episode_costs[cost_name] = deque(maxlen=trainer_config.episode_cost_window_size)
+            self.episode_costs[cost_name] = deque(
+                maxlen=trainer_config.episode_cost_window_size
+            )
 
     def _step_safety_checker(
         self,
@@ -85,21 +90,31 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
         Returns:
             `tuple`: The input processed data.
         """
-        for name, tensor_list in zip(["queries", "responses", "scores"], [queries, responses, scores]):
+        for name, tensor_list in zip(
+            ["queries", "responses", "scores"], [queries, responses, scores]
+        ):
             if not isinstance(tensor_list, list):
-                raise ValueError(f"{name} must be a list of tensors - got {type(tensor_list)}")
+                raise ValueError(
+                    f"{name} must be a list of tensors - got {type(tensor_list)}"
+                )
             if not isinstance(tensor_list[0], torch.Tensor):
-                raise ValueError(f"Elements in {name} must be tensors - got {type(tensor_list[0])}")
+                raise ValueError(
+                    f"Elements in {name} must be tensors - got {type(tensor_list[0])}"
+                )
             if batch_size is not None and len(tensor_list) != batch_size:
                 raise ValueError(
                     f"Batch size ({batch_size}) does not match number of examples - but got {len(tensor_list)} for: {name}"
                 )
         for cost_name in self.cost_module_names:
-            if not isinstance(costs['cost_' + cost_name], list):
-                raise ValueError(f"{cost_name} must be a list of tensors - got {type(costs['cost_' + cost_name])}")
-            if not isinstance(costs['cost_' + cost_name][0], torch.Tensor):
-                raise ValueError(f"Elements in {cost_name} must be tensors - got {type(costs['cost_' + cost_name][0])}")
-            if batch_size is not None and len(costs['cost_' + cost_name]) != batch_size:
+            if not isinstance(costs["cost_" + cost_name], list):
+                raise ValueError(
+                    f"{cost_name} must be a list of tensors - got {type(costs['cost_' + cost_name])}"
+                )
+            if not isinstance(costs["cost_" + cost_name][0], torch.Tensor):
+                raise ValueError(
+                    f"Elements in {cost_name} must be tensors - got {type(costs['cost_' + cost_name][0])}"
+                )
+            if batch_size is not None and len(costs["cost_" + cost_name]) != batch_size:
                 raise ValueError(
                     f"Batch size ({batch_size}) does not match number of examples - but got {len(costs['cost_' + cost_name])} for: {cost_name}"
                 )
@@ -108,19 +123,32 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
         queries = [tensor.to(self.current_device) for tensor in queries]
         responses = [tensor.to(self.current_device) for tensor in responses]
         scores = [tensor.to(self.current_device) for tensor in scores]
-        masks = [tensor.to(self.current_device) for tensor in masks] if masks is not None else None
-        costs = {cost_name: [cost.to(self.current_device) for cost in costs['cost_' + cost_name]] for cost_name in self.cost_module_names}
+        masks = (
+            [tensor.to(self.current_device) for tensor in masks]
+            if masks is not None
+            else None
+        )
+        costs = {
+            cost_name: [
+                cost.to(self.current_device) for cost in costs["cost_" + cost_name]
+            ]
+            for cost_name in self.cost_module_names
+        }
 
         # squeeze scores if needed
         for i, score in enumerate(scores):
             if score.dim() > 1:
-                raise ValueError(f"Scores must be 1-dimensional - got {score.dim()} for {score}")
+                raise ValueError(
+                    f"Scores must be 1-dimensional - got {score.dim()} for {score}"
+                )
             elif score.dim() == 1:
                 scores[i] = score.squeeze()
         for cost_name in self.cost_module_names:
             for i, cost in enumerate(costs[cost_name]):
                 if cost.dim() > 1:
-                    raise ValueError(f"Costs must be 1-dimensional - got {cost.dim()} for {cost}")
+                    raise ValueError(
+                        f"Costs must be 1-dimensional - got {cost.dim()} for {cost}"
+                    )
                 elif cost.dim() == 1:
                     costs[cost_name][i] = cost.squeeze()
 
@@ -169,14 +197,19 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
         model.eval()
 
         for i in range(math.ceil(bs / fbs)):
-            input_kwargs = {key: value[i * fbs : (i + 1) * fbs] for key, value in model_inputs.items()}
+            input_kwargs = {
+                key: value[i * fbs : (i + 1) * fbs]
+                for key, value in model_inputs.items()
+            }
             query_batch = queries[i * fbs : (i + 1) * fbs]
             response_batch = responses[i * fbs : (i + 1) * fbs]
             if response_masks is not None:
                 response_masks_batch = response_masks[i * fbs : (i + 1) * fbs]
-            logits, _, values, cost_values = model(**input_kwargs, return_values=return_values)
+            logits, _, values, cost_values = model(
+                **input_kwargs, return_values=return_values
+            )
             if self.config.scale_logits:
-                logits = logits / self.config.red_generation_kwargs['temperature']
+                logits = logits / self.config.red_generation_kwargs["temperature"]
 
             if self.is_encoder_decoder:
                 input_ids = input_kwargs["decoder_input_ids"]
@@ -195,7 +228,9 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
                     start = 1
                     end = attention_mask[j, :].sum() - 1
                 else:
-                    start = len(query_batch[j]) - 1  # logprobs starts from the second query token
+                    start = (
+                        len(query_batch[j]) - 1
+                    )  # logprobs starts from the second query token
                     if attention_mask[j, 0] == 0:  # offset left padding
                         start += attention_mask[j, :].nonzero()[0]
                     end = start + len(response_batch[j])
@@ -207,7 +242,9 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
                 masks[j, :start] = 0
                 masks[j, end:] = 0
                 if response_masks is not None:
-                    masks[j, start:end] = masks[j, start:end] * response_masks_batch[j][start:end]
+                    masks[j, start:end] = (
+                        masks[j, start:end] * response_masks_batch[j][start:end]
+                    )
 
             if return_logits:
                 all_logits.append(logits)
@@ -226,7 +263,14 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
             torch.cat(all_logprobs),
             torch.cat(all_logits)[:, :-1] if return_logits else None,
             torch.cat(all_values)[:, :-1] if return_values else None,
-            {cost_name: torch.cat(all_cost_values[cost_name])[:, :-1] for cost_name in all_cost_values} if return_values else None,
+            (
+                {
+                    cost_name: torch.cat(all_cost_values[cost_name])[:, :-1]
+                    for cost_name in all_cost_values
+                }
+                if return_values
+                else None
+            ),
             torch.cat(all_masks)[:, :-1],
         )
 
@@ -242,18 +286,25 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
         rewards, non_score_rewards, kls, costs = [], [], [], {}
 
         # going over each trajectory in the batch
-        for i, (score, logprob, ref_logprob, mask) in enumerate(zip(scores, logprobs, ref_logprobs, masks)):
+        for i, (score, logprob, ref_logprob, mask) in enumerate(
+            zip(scores, logprobs, ref_logprobs, masks)
+        ):
             # compute KL penalty (from difference in logprobs)
             kl = self._kl_penalty(logprob, ref_logprob)
             kls.append(self._kl_penalty(logprob, ref_logprob))
 
             entropy = self._entropy_bonus(logprob)
 
-            non_score_reward = -self.kl_ctl.value * kl + self.config.entropy_coeff * entropy
+            non_score_reward = (
+                -self.kl_ctl.value * kl + self.config.entropy_coeff * entropy
+            )
             non_score_rewards.append(non_score_reward)
             reward = non_score_reward.clone()
             # token level costs are zero, only has sequence level costs
-            cost = {cost_name: torch.zeros_like(reward) for cost_name in self.cost_module_names}
+            cost = {
+                cost_name: torch.zeros_like(reward)
+                for cost_name in self.cost_module_names
+            }
             last_non_masked_index = mask.nonzero()[-1]
 
             # reward is preference model score + KL penalty
@@ -268,7 +319,7 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
             torch.stack(rewards),
             {cost_name: torch.stack(costs[cost_name]) for cost_name in costs.keys()},
             torch.stack(non_score_rewards),
-            torch.stack(kls)
+            torch.stack(kls),
         )
 
     @PPODecorators.empty_device_cache()
@@ -283,49 +334,82 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
     ):
         # setups
         bs = self.config.batch_size
-        queries, responses, scores, cost_scores, response_masks = self._step_safety_checker(
-            bs, queries, responses, scores, cost_scores, response_masks
+        queries, responses, scores, cost_scores, response_masks = (
+            self._step_safety_checker(
+                bs, queries, responses, scores, cost_scores, response_masks
+            )
         )
 
         # update lagrange first
         for cost_name, lagrange in self.lagrange_multipliers.items():
-            episode_cost = torch.tensor(self.episode_costs[cost_name]).mean().to(self.accelerator.device)
+            episode_cost = (
+                torch.tensor(self.episode_costs[cost_name])
+                .mean()
+                .to(self.accelerator.device)
+            )
             episode_cost = self.accelerator.reduce(episode_cost, reduction="mean")
-            if self.accelerator.is_main_process and self.current_step >= self.lagrange_update_delay_steps:
+            if (
+                self.accelerator.is_main_process
+                and self.current_step >= self.lagrange_update_delay_steps
+            ):
                 lagrange.update_lambda(episode_cost)
             broadcast(lagrange.transformed_lambda, from_process=0)
         self.accelerator.wait_for_everyone()
 
         # ppo step
         scores = torch.tensor(scores, device=self.current_device)
-        cost_scores = {cost_name: torch.tensor(cost_scores[cost_name], device=self.current_device) for cost_name in self.cost_module_names}
+        cost_scores = {
+            cost_name: torch.tensor(cost_scores[cost_name], device=self.current_device)
+            for cost_name in self.cost_module_names
+        }
         if self.config.use_score_scaling:
             # Score scaling
             scores_mean, scores_std = self.running.update(scores)
             tensor_to_kwargs = dict(dtype=scores.dtype, device=scores.device)
-            score_scaling_factor = self.running.std.to(**tensor_to_kwargs) + torch.finfo(scores.dtype).eps
+            score_scaling_factor = (
+                self.running.std.to(**tensor_to_kwargs) + torch.finfo(scores.dtype).eps
+            )
             if self.config.use_score_norm:
-                scores = (scores - self.running.mean.to(**tensor_to_kwargs)) / score_scaling_factor
+                scores = (
+                    scores - self.running.mean.to(**tensor_to_kwargs)
+                ) / score_scaling_factor
             else:
                 scores /= score_scaling_factor
             # Cost scaling
             for cost_name in self.cost_module_names:
-                cost_mean, cost_std = self.running_cost[cost_name].update(cost_scores[cost_name])
-                tensor_to_kwargs = dict(dtype=cost_scores[cost_name].dtype, device=cost_scores[cost_name].device)
-                score_scaling_factor = self.running_cost[cost_name].std.to(**tensor_to_kwargs) + torch.finfo(cost_scores[cost_name].dtype).eps
+                cost_mean, cost_std = self.running_cost[cost_name].update(
+                    cost_scores[cost_name]
+                )
+                tensor_to_kwargs = dict(
+                    dtype=cost_scores[cost_name].dtype,
+                    device=cost_scores[cost_name].device,
+                )
+                score_scaling_factor = (
+                    self.running_cost[cost_name].std.to(**tensor_to_kwargs)
+                    + torch.finfo(cost_scores[cost_name].dtype).eps
+                )
                 if self.config.use_score_norm:
-                    cost_scores[cost_name] = (cost_scores[cost_name] - self.running_cost[cost_name].mean.to(**tensor_to_kwargs)) / score_scaling_factor
+                    cost_scores[cost_name] = (
+                        cost_scores[cost_name]
+                        - self.running_cost[cost_name].mean.to(**tensor_to_kwargs)
+                    ) / score_scaling_factor
                 else:
                     cost_scores[cost_name] /= score_scaling_factor
 
         if self.config.score_clip is not None:
             # Score clipping
             scores_dtype = scores.dtype
-            scores = torch.clip(scores.float(), -self.config.score_clip, self.config.score_clip).to(dtype=scores_dtype)
+            scores = torch.clip(
+                scores.float(), -self.config.score_clip, self.config.score_clip
+            ).to(dtype=scores_dtype)
             # Cost clipping
             for cost_name in self.cost_module_names:
                 costs_dtype = cost_scores[cost_name].dtype
-                cost_scores[cost_name] = torch.clip(cost_scores[cost_name].float(), -self.config.cost_clip, self.config.cost_clip).to(dtype=costs_dtype)
+                cost_scores[cost_name] = torch.clip(
+                    cost_scores[cost_name].float(),
+                    -self.config.cost_clip,
+                    self.config.cost_clip,
+                ).to(dtype=costs_dtype)
 
         # if we want to push best model to the hub
         if hasattr(self, "highest_reward"):
@@ -358,17 +442,21 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
                 model_inputs["attention_mask"], dim=1, pad_index=0, pad_first=pad_first
             )
             if self.is_encoder_decoder:
-                model_inputs["decoder_input_ids"] = self.accelerator.pad_across_processes(
-                    model_inputs["decoder_input_ids"],
-                    dim=1,
-                    pad_index=self.tokenizer.pad_token_id,
-                    pad_first=pad_first,
+                model_inputs["decoder_input_ids"] = (
+                    self.accelerator.pad_across_processes(
+                        model_inputs["decoder_input_ids"],
+                        dim=1,
+                        pad_index=self.tokenizer.pad_token_id,
+                        pad_first=pad_first,
+                    )
                 )
-                model_inputs["decoder_attention_mask"] = self.accelerator.pad_across_processes(
-                    model_inputs["decoder_attention_mask"],
-                    dim=1,
-                    pad_index=0,
-                    pad_first=pad_first,
+                model_inputs["decoder_attention_mask"] = (
+                    self.accelerator.pad_across_processes(
+                        model_inputs["decoder_attention_mask"],
+                        dim=1,
+                        pad_index=0,
+                        pad_first=pad_first,
+                    )
                 )
 
         model_inputs_names = list(model_inputs.keys())
@@ -376,14 +464,16 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
         full_kl_penalty = self.config.kl_penalty == "full"
 
         with torch.no_grad():
-            all_logprobs, logits_or_none, values, cost_values, masks = self.batched_forward_pass(
-                self.model,
-                queries,
-                responses,
-                model_inputs,
-                response_masks=response_masks,
-                return_logits=full_kl_penalty,
-                return_values=True,
+            all_logprobs, logits_or_none, values, cost_values, masks = (
+                self.batched_forward_pass(
+                    self.model,
+                    queries,
+                    responses,
+                    model_inputs,
+                    response_masks=response_masks,
+                    return_logits=full_kl_penalty,
+                    return_values=True,
+                )
             )
             with self.optional_peft_ctx():
                 ref_logprobs, ref_logits_or_none, _, _, _ = self.batched_forward_pass(
@@ -400,8 +490,12 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
         with torch.no_grad():
             t = time.time()
             if full_kl_penalty:
-                active_full_logprobs = logprobs_from_logits(logits_or_none, None, gather=False)
-                ref_full_logprobs = logprobs_from_logits(ref_logits_or_none, None, gather=False)
+                active_full_logprobs = logprobs_from_logits(
+                    logits_or_none, None, gather=False
+                )
+                ref_full_logprobs = logprobs_from_logits(
+                    ref_logits_or_none, None, gather=False
+                )
 
                 rewards, costs, non_score_reward, kls = self.compute_rewards(
                     scores, cost_scores, active_full_logprobs, ref_full_logprobs, masks
@@ -413,10 +507,16 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
             timing["time/ppo/compute_rewards"] = time.time() - t
 
             t = time.time()
-            values, advantages, returns = self.compute_advantages(values, rewards, masks)
+            values, advantages, returns = self.compute_advantages(
+                values, rewards, masks
+            )
             cost_advantages, cost_returns = {}, {}
             for cost_name in self.cost_module_names:
-                cost_values[cost_name], cost_advantages[cost_name], cost_returns[cost_name] = self.compute_advantages(
+                (
+                    cost_values[cost_name],
+                    cost_advantages[cost_name],
+                    cost_returns[cost_name],
+                ) = self.compute_advantages(
                     cost_values[cost_name], costs[cost_name], masks
                 )
             timing["time/ppo/compute_advantages"] = time.time() - t
@@ -430,9 +530,18 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
             "masks": masks,
             "advantages": advantages,
             "returns": returns,
-            **{f'{cost_name}_returns' : cost_returns[cost_name] for cost_name in self.cost_module_names},
-            **{f'{cost_name}_advantages' : cost_advantages[cost_name] for cost_name in self.cost_module_names},
-            **{f'{cost_name}_values' : cost_values[cost_name] for cost_name in self.cost_module_names},
+            **{
+                f"{cost_name}_returns": cost_returns[cost_name]
+                for cost_name in self.cost_module_names
+            },
+            **{
+                f"{cost_name}_advantages": cost_advantages[cost_name]
+                for cost_name in self.cost_module_names
+            },
+            **{
+                f"{cost_name}_values": cost_values[cost_name]
+                for cost_name in self.cost_module_names
+            },
         }
         batch_dict.update(model_inputs)
 
@@ -444,29 +553,54 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
                 break
             b_inds = np.random.permutation(bs)
             for backward_batch_start in range(0, bs, self.config.backward_batch_size):
-                backward_batch_end = backward_batch_start + self.config.backward_batch_size
+                backward_batch_end = (
+                    backward_batch_start + self.config.backward_batch_size
+                )
                 backward_batch_inds = b_inds[backward_batch_start:backward_batch_end]
 
-                for mini_batch_start in range(0, self.config.backward_batch_size, self.config.mini_batch_size):
+                for mini_batch_start in range(
+                    0, self.config.backward_batch_size, self.config.mini_batch_size
+                ):
                     mini_batch_end = mini_batch_start + self.config.mini_batch_size
-                    mini_batch_inds = backward_batch_inds[mini_batch_start:mini_batch_end]
+                    mini_batch_inds = backward_batch_inds[
+                        mini_batch_start:mini_batch_end
+                    ]
                     mini_batch_dict = {
                         "logprobs": batch_dict["logprobs"][mini_batch_inds],
                         "values": batch_dict["values"][mini_batch_inds],
                         "masks": batch_dict["masks"][mini_batch_inds],
                         # hacks: the queries and responses are ragged.
                         "queries": [batch_dict["queries"][i] for i in mini_batch_inds],
-                        "responses": [batch_dict["responses"][i] for i in mini_batch_inds],
+                        "responses": [
+                            batch_dict["responses"][i] for i in mini_batch_inds
+                        ],
                         "advantages": batch_dict["advantages"][mini_batch_inds],
                         "returns": batch_dict["returns"][mini_batch_inds],
-                        **{f'cost_{cost_name}_returns' : batch_dict[f'{cost_name}_returns'][mini_batch_inds] for cost_name in self.cost_module_names},
-                        **{f'cost_{cost_name}_advantages' : batch_dict[f'{cost_name}_advantages'][mini_batch_inds] for cost_name in self.cost_module_names},
-                        **{f'cost_{cost_name}_values' : batch_dict[f'{cost_name}_values'][mini_batch_inds] for cost_name in self.cost_module_names},
+                        **{
+                            f"cost_{cost_name}_returns": batch_dict[
+                                f"{cost_name}_returns"
+                            ][mini_batch_inds]
+                            for cost_name in self.cost_module_names
+                        },
+                        **{
+                            f"cost_{cost_name}_advantages": batch_dict[
+                                f"{cost_name}_advantages"
+                            ][mini_batch_inds]
+                            for cost_name in self.cost_module_names
+                        },
+                        **{
+                            f"cost_{cost_name}_values": batch_dict[
+                                f"{cost_name}_values"
+                            ][mini_batch_inds]
+                            for cost_name in self.cost_module_names
+                        },
                     }
                     for k in model_inputs_names:
                         mini_batch_dict[k] = batch_dict[k][mini_batch_inds]
                     with self.accelerator.accumulate(self.model):
-                        model_inputs = {k: mini_batch_dict[k] for k in model_inputs_names}
+                        model_inputs = {
+                            k: mini_batch_dict[k] for k in model_inputs_names
+                        }
 
                         logprobs, logits, vpreds, cpreds, _ = self.batched_forward_pass(
                             self.model,
@@ -486,9 +620,21 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
                             mini_batch_dict["advantages"],
                             mini_batch_dict["returns"],
                             cpreds,
-                            {k.replace('cost_', '').replace('_values', ''): v for k, v in mini_batch_dict.items() if k.startswith('cost_') and 'values' in k},
-                            {k.replace('cost_', '').replace('_advantages', ''): v for k, v in mini_batch_dict.items() if k.startswith('cost_') and 'advantages' in k},
-                            {k.replace('cost_', '').replace('_returns', ''): v for k, v in mini_batch_dict.items() if k.startswith('cost_') and 'returns' in k},
+                            {
+                                k.replace("cost_", "").replace("_values", ""): v
+                                for k, v in mini_batch_dict.items()
+                                if k.startswith("cost_") and "values" in k
+                            },
+                            {
+                                k.replace("cost_", "").replace("_advantages", ""): v
+                                for k, v in mini_batch_dict.items()
+                                if k.startswith("cost_") and "advantages" in k
+                            },
+                            {
+                                k.replace("cost_", "").replace("_returns", ""): v
+                                for k, v in mini_batch_dict.items()
+                                if k.startswith("cost_") and "returns" in k
+                            },
                         )
                         all_stats.append(train_stats)
 
@@ -505,12 +651,22 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
         train_stats = stack_dicts(all_stats)
 
         # reshape advantages/ratios such that they are not averaged.
-        train_stats["policy/advantages"] = torch.flatten(train_stats["policy/advantages"]).unsqueeze(0)
-        train_stats["policy/advantages"] = torch.nan_to_num(train_stats["policy/advantages"], WANDB_PADDING)
-        train_stats["policy/ratio"] = torch.flatten(train_stats["policy/ratio"]).unsqueeze(0)
+        train_stats["policy/advantages"] = torch.flatten(
+            train_stats["policy/advantages"]
+        ).unsqueeze(0)
+        train_stats["policy/advantages"] = torch.nan_to_num(
+            train_stats["policy/advantages"], WANDB_PADDING
+        )
+        train_stats["policy/ratio"] = torch.flatten(
+            train_stats["policy/ratio"]
+        ).unsqueeze(0)
         for cost_name in self.cost_module_names:
-            train_stats[f"policy/{cost_name}_disadvantages"] = torch.flatten(train_stats[f"policy/{cost_name}_advantages"]).unsqueeze(0)
-            train_stats[f"policy/{cost_name}_disadvantages"] = torch.nan_to_num(train_stats[f"policy/{cost_name}_advantages"], WANDB_PADDING)
+            train_stats[f"policy/{cost_name}_disadvantages"] = torch.flatten(
+                train_stats[f"policy/{cost_name}_advantages"]
+            ).unsqueeze(0)
+            train_stats[f"policy/{cost_name}_disadvantages"] = torch.nan_to_num(
+                train_stats[f"policy/{cost_name}_advantages"], WANDB_PADDING
+            )
 
         stats = self.record_step_stats(
             costs=costs,
@@ -520,7 +676,7 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
             non_score_reward=non_score_reward,
             train_stats=train_stats,
             kl_coef=self.kl_ctl.value,
-            masks=masks,    
+            masks=masks,
             queries=queries,
             responses=responses,
             kls=kls,
@@ -533,7 +689,9 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
         timing["time/ppo/calc_stats"] = time.time() - t
         stats["ppo/learning_rate"] = self.optimizer.param_groups[0]["lr"]
         for cost_name in self.cost_module_names:
-            stats[f"lagrange/{cost_name}_lambda"] = self.lagrange_multipliers[cost_name].get_multiplier().item()
+            stats[f"lagrange/{cost_name}_lambda"] = (
+                self.lagrange_multipliers[cost_name].get_multiplier().item()
+            )
 
         # Update the KL control - multiply the batch_size by the number of processes
         self.kl_ctl.update(
@@ -582,16 +740,36 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
         vf_clipfrac = masked_mean(torch.gt(vf_losses2, vf_losses1).float(), mask)
 
         # cost value losses
-        if cost_values != {}: # if there are cost values
-            cpredclipped = {cost_name: clip_by_value(
-                cpreds[cost_name],
-                cost_values[cost_name] - self.config.cliprange_value,
-                cost_values[cost_name] + self.config.cliprange_value,
-            ) for cost_name in self.cost_module_names}
-            cf_losses1 = {cost_name: (cpreds[cost_name] - cost_returns[cost_name]) ** 2 for cost_name in self.cost_module_names}
-            cf_losses2 = {cost_name: (cpredclipped[cost_name] - cost_returns[cost_name]) ** 2 for cost_name in self.cost_module_names}
-            cf_loss = {cost_name: 0.5 * masked_mean(torch.max(cf_losses1[cost_name], cf_losses2[cost_name]), mask) for cost_name in self.cost_module_names}
-            cf_clipfrac = {cost_name: masked_mean(torch.gt(cf_losses2[cost_name], cf_losses1[cost_name]).float(), mask) for cost_name in self.cost_module_names}
+        if cost_values != {}:  # if there are cost values
+            cpredclipped = {
+                cost_name: clip_by_value(
+                    cpreds[cost_name],
+                    cost_values[cost_name] - self.config.cliprange_value,
+                    cost_values[cost_name] + self.config.cliprange_value,
+                )
+                for cost_name in self.cost_module_names
+            }
+            cf_losses1 = {
+                cost_name: (cpreds[cost_name] - cost_returns[cost_name]) ** 2
+                for cost_name in self.cost_module_names
+            }
+            cf_losses2 = {
+                cost_name: (cpredclipped[cost_name] - cost_returns[cost_name]) ** 2
+                for cost_name in self.cost_module_names
+            }
+            cf_loss = {
+                cost_name: 0.5
+                * masked_mean(
+                    torch.max(cf_losses1[cost_name], cf_losses2[cost_name]), mask
+                )
+                for cost_name in self.cost_module_names
+            }
+            cf_clipfrac = {
+                cost_name: masked_mean(
+                    torch.gt(cf_losses2[cost_name], cf_losses1[cost_name]).float(), mask
+                )
+                for cost_name in self.cost_module_names
+            }
             cf_loss_w_coef = sum(cf_loss.values()) * self.config.cost_coef
         else:
             # if there are no cost values, then no loss on it
@@ -605,7 +783,9 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
         normalizer = 1.0
         if cost_values != {}:
             for cost_name, cost_advantage in cost_advantages.items():
-                multiplier = self.lagrange_multipliers[cost_name].get_multiplier().item()
+                multiplier = (
+                    self.lagrange_multipliers[cost_name].get_multiplier().item()
+                )
                 # cost is negative advantage
                 combined_advantages -= multiplier * cost_advantage
                 normalizer += multiplier
@@ -613,7 +793,9 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
             combined_advantages /= normalizer
 
         pg_losses = -combined_advantages * ratio
-        pg_losses2 = -combined_advantages * torch.clamp(ratio, 1.0 - self.config.cliprange, 1.0 + self.config.cliprange)
+        pg_losses2 = -combined_advantages * torch.clamp(
+            ratio, 1.0 - self.config.cliprange, 1.0 + self.config.cliprange
+        )
 
         pg_loss = masked_mean(torch.max(pg_losses, pg_losses2), mask)
         pg_clipfrac = masked_mean(torch.gt(pg_losses2, pg_losses).float(), mask)
@@ -627,7 +809,10 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
             )
             pg_loss = pg_loss * 0.0
             vf_loss = vf_loss * 0.0
-            cf_loss = {cost_name: cf_loss[cost_name] * 0.0 for cost_name in self.cost_module_names}
+            cf_loss = {
+                cost_name: cf_loss[cost_name] * 0.0
+                for cost_name in self.cost_module_names
+            }
             loss = loss * 0.0
 
         entropy = masked_mean(entropy_from_logits(logits), mask)
@@ -638,16 +823,36 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
         return_mean, return_var = masked_mean(returns, mask), masked_var(returns, mask)
         value_mean, value_var = masked_mean(values, mask), masked_var(values, mask)
         cost_return_mean, cost_return_var = (
-            {cost_name: masked_mean(cost_returns[cost_name], mask) for cost_name in self.cost_module_names},
-            {cost_name: masked_var(cost_returns[cost_name], mask) for cost_name in self.cost_module_names}
+            {
+                cost_name: masked_mean(cost_returns[cost_name], mask)
+                for cost_name in self.cost_module_names
+            },
+            {
+                cost_name: masked_var(cost_returns[cost_name], mask)
+                for cost_name in self.cost_module_names
+            },
         )
         cost_value_mean, cost_value_var = (
-            {cost_name: masked_mean(cost_values[cost_name], mask) for cost_name in self.cost_module_names},
-            {cost_name: masked_var(cost_values[cost_name], mask) for cost_name in self.cost_module_names}
+            {
+                cost_name: masked_mean(cost_values[cost_name], mask)
+                for cost_name in self.cost_module_names
+            },
+            {
+                cost_name: masked_var(cost_values[cost_name], mask)
+                for cost_name in self.cost_module_names
+            },
         )
 
         stats = dict(
-            loss=dict(policy=pg_loss.detach(), value=vf_loss.detach(), total=loss.detach(), **{cost_name + '_cost': cf_loss[cost_name].detach() for cost_name in self.cost_module_names}),
+            loss=dict(
+                policy=pg_loss.detach(),
+                value=vf_loss.detach(),
+                total=loss.detach(),
+                **{
+                    cost_name + "_cost": cf_loss[cost_name].detach()
+                    for cost_name in self.cost_module_names
+                },
+            ),
             policy=dict(
                 entropy=entropy.detach(),
                 approxkl=approxkl.detach(),
@@ -655,16 +860,25 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
                 clipfrac=pg_clipfrac.detach(),
                 advantages=advantages.detach(),
                 advantages_mean=masked_mean(advantages, mask).detach(),
-                **{cost_name + '_advantages': cost_advantages[cost_name].detach() for cost_name in self.cost_module_names},
-                **{cost_name + '_advantages_mean': masked_mean(cost_advantages[cost_name], mask).detach() for cost_name in self.cost_module_names},
+                **{
+                    cost_name + "_advantages": cost_advantages[cost_name].detach()
+                    for cost_name in self.cost_module_names
+                },
+                **{
+                    cost_name
+                    + "_advantages_mean": masked_mean(
+                        cost_advantages[cost_name], mask
+                    ).detach()
+                    for cost_name in self.cost_module_names
+                },
                 combined_advantages=combined_advantages.detach(),
                 ratio=ratio.detach(),
             ),
             returns=dict(
                 mean=return_mean.detach(),
                 var=return_var.detach(),
-                **{k + '_mean': v.detach() for k, v in cost_return_mean.items()},
-                **{k + '_var': v.detach() for k, v in cost_return_var.items()},
+                **{k + "_mean": v.detach() for k, v in cost_return_mean.items()},
+                **{k + "_var": v.detach() for k, v in cost_return_var.items()},
             ),
             val=dict(
                 vpred=masked_mean(vpreds, mask).detach(),
@@ -674,14 +888,37 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
                 var=value_var.detach(),
             ),
             cost_val=dict(
-                **{cost_name + '_vpred': masked_mean(cpreds[cost_name], mask).detach() for cost_name in self.cost_module_names},
-                **{cost_name + '_error': masked_mean((cpreds[cost_name] - cost_returns[cost_name]) ** 2, mask).detach() for cost_name in self.cost_module_names},
-                **{cost_name + '_clipfrac': cf_clipfrac[cost_name].detach() for cost_name in self.cost_module_names},
-                **{cost_name + '_mean': cost_value_mean[cost_name].detach() for cost_name in self.cost_module_names},
-                **{cost_name + '_var': cost_value_var[cost_name].detach() for cost_name in self.cost_module_names},
+                **{
+                    cost_name + "_vpred": masked_mean(cpreds[cost_name], mask).detach()
+                    for cost_name in self.cost_module_names
+                },
+                **{
+                    cost_name
+                    + "_error": masked_mean(
+                        (cpreds[cost_name] - cost_returns[cost_name]) ** 2, mask
+                    ).detach()
+                    for cost_name in self.cost_module_names
+                },
+                **{
+                    cost_name + "_clipfrac": cf_clipfrac[cost_name].detach()
+                    for cost_name in self.cost_module_names
+                },
+                **{
+                    cost_name + "_mean": cost_value_mean[cost_name].detach()
+                    for cost_name in self.cost_module_names
+                },
+                **{
+                    cost_name + "_var": cost_value_var[cost_name].detach()
+                    for cost_name in self.cost_module_names
+                },
             ),
         )
-        return pg_loss, self.config.vf_coef * vf_loss, cf_loss_w_coef, flatten_dict(stats)
+        return (
+            pg_loss,
+            self.config.vf_coef * vf_loss,
+            cf_loss_w_coef,
+            flatten_dict(stats),
+        )
 
     @PPODecorators.empty_device_cache()
     def train_minibatch(
@@ -702,8 +939,18 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
     ):
         self.model.train()
         loss_p, loss_v, loss_c, train_stats = self.loss(
-            old_logprobs, values, logits, vpreds, logprobs, mask, advantages, returns,
-            cpreds, cost_values, cost_advantages, cost_returns,
+            old_logprobs,
+            values,
+            logits,
+            vpreds,
+            logprobs,
+            mask,
+            advantages,
+            returns,
+            cpreds,
+            cost_values,
+            cost_advantages,
+            cost_returns,
         )
         loss = loss_p + loss_v + loss_c
         self.accelerator.backward(loss)
@@ -719,7 +966,13 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
         self.optimizer.zero_grad()
         return train_stats
 
-    def record_step_stats(self, costs: torch.Tensor, kl_coef: float, scores_dict: Dict[str, torch.Tensor], **data):
+    def record_step_stats(
+        self,
+        costs: torch.Tensor,
+        kl_coef: float,
+        scores_dict: Dict[str, torch.Tensor],
+        **data,
+    ):
         stats = super().record_step_stats(kl_coef, scores_dict, **data)
         return stats
 
@@ -730,7 +983,7 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
         rewards: List[torch.FloatTensor],
         costs: Dict[str, List[torch.FloatTensor]],
         columns_to_log: List[str] = ["query", "response"],
-        log_freq = 1000,
+        log_freq=1000,
     ):
         # all gather stats
         if not isinstance(rewards, torch.Tensor):
@@ -743,7 +996,7 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
         if torch.isinf(rewards).any():
             warnings.warn("Inf values found in rewards.!!!!!!!")
 
-        if costs is not None: # if there are costs
+        if costs is not None:  # if there are costs
             for cost_name, cost in costs.items():
                 if not isinstance(cost, torch.Tensor):
                     costs[cost_name] = torch.tensor(cost).to(self.current_device)
@@ -751,13 +1004,20 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
                         warnings.warn(f"NaN values found in {cost_name} costs.!!!!!!!")
                     if torch.isinf(costs[cost_name]).any():
                         warnings.warn(f"Inf values found in {cost_name} costs.!!!!!!!")
-            costs = {cost_name: self.accelerator.gather(costs[cost_name]).flatten() for cost_name in costs.keys()}
+            costs = {
+                cost_name: self.accelerator.gather(costs[cost_name]).flatten()
+                for cost_name in costs.keys()
+            }
 
         if self.config.log_with == "wandb":
             import wandb
 
-            if any([column_to_log not in batch.keys() for column_to_log in columns_to_log]):
-                raise ValueError(f"Columns to log {columns_to_log} are not present in the batch {batch.keys()}.")
+            if any(
+                [column_to_log not in batch.keys() for column_to_log in columns_to_log]
+            ):
+                raise ValueError(
+                    f"Columns to log {columns_to_log} are not present in the batch {batch.keys()}."
+                )
 
             batch_list = [batch[column_to_log] for column_to_log in columns_to_log]
             if self.is_distributed:
@@ -803,5 +1063,7 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
 
             self.accelerator.log(
                 logs,
-                step=self.current_step if self.config.log_with == "tensorboard" else None,
+                step=(
+                    self.current_step if self.config.log_with == "tensorboard" else None
+                ),
             )

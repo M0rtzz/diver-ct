@@ -71,7 +71,5 @@ def get_tanimoto_K(mols, fp="morgan"):
         fps = [fp(x) for e in mols]
     for i in range(N):
         for j in range(i, N):
-            K[i, j] = K[j, i] = DataStructs.FingerprintSimilarity(
-                fps[i], fps[j]
-            )
+            K[i, j] = K[j, i] = DataStructs.FingerprintSimilarity(fps[i], fps[j])
     return K

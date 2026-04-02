@@ -65,9 +65,7 @@ def get_inception(pretrained=True, pool=True):
         weights = Inception_V3_Weights.DEFAULT
     else:
         weights = None
-    model = inception_v3(
-        weights=weights, transform_input=True
-    ).eval()
+    model = inception_v3(weights=weights, transform_input=True).eval()
     if pool:
         model.fc = nn.Identity()
     return model
