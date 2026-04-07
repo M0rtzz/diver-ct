@@ -210,6 +210,7 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
             )
             if self.config.scale_logits:
                 logits = logits / self.config.red_generation_kwargs["temperature"]
+            logits = self._sanitize_logits(logits, "constrained_batched_forward_pass")
 
             if self.is_encoder_decoder:
                 input_ids = input_kwargs["decoder_input_ids"]
@@ -953,18 +954,36 @@ class ConstrainedRedTeamingPPOTrainer(RedTeamPPOTrainer):
             cost_returns,
         )
         loss = loss_p + loss_v + loss_c
+        if not torch.isfinite(loss):
+            warnings.warn(
+                "Skipping constrained PPO minibatch because the combined loss became non-finite."
+            )
+            self.optimizer.zero_grad()
+            return self._sanitize_train_stats(train_stats)
         self.accelerator.backward(loss)
+        if self._has_non_finite_gradients():
+            warnings.warn(
+                "Skipping constrained PPO minibatch because non-finite gradients were detected."
+            )
+            self.optimizer.zero_grad()
+            return self._sanitize_train_stats(train_stats)
         if self.config.max_grad_norm is not None:
             if self.accelerator.sync_gradients:
                 self.accelerator.clip_grad_norm_(
                     self.model_params,
                     self.config.max_grad_norm,
                 )
+                if self._has_non_finite_gradients():
+                    warnings.warn(
+                        "Skipping constrained PPO minibatch because gradient clipping produced non-finite gradients."
+                    )
+                    self.optimizer.zero_grad()
+                    return self._sanitize_train_stats(train_stats)
         self.optimizer.step()
         # we call optimizer.zero_grad() every time and let `accelerator` handle accumulation
         # see https://huggingface.co/docs/accelerate/usage_guides/gradient_accumulation#the-finished-code
         self.optimizer.zero_grad()
-        return train_stats
+        return self._sanitize_train_stats(train_stats)
 
     def record_step_stats(
         self,

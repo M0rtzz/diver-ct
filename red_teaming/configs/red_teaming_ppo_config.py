@@ -142,9 +142,17 @@ class RedTeamPPOConfig(PPOConfig):
     scale_logits: bool = field(
         default=True, metadata={"help": "Whether to scale logits"}
     )
+    separate_critics: bool = field(
+        default=False,
+        metadata={
+            "help": "Deprecated compatibility flag. Separate critics are not implemented."
+        },
+    )
 
     def __post_init__(self):
         super().__post_init__()
+        if self.separate_critics:
+            raise NotImplementedError("Separate critics are not implemented")
         # Set the attributes for red_team_model_config
         new_generation_kwargs = {}
         for key, value in self.__dict__.items():

@@ -15,6 +15,13 @@ from red_teaming.utility_functions.embedders import get_embedder
 from red_teaming.utility_functions.metrics import Metrics
 
 
+def tokenize_text(text: str):
+    try:
+        return nltk.word_tokenize(text)
+    except LookupError:
+        return nltk.wordpunct_tokenize(text)
+
+
 class SelfBLEUScore(Metrics):
     """
     This class is used to calculate the novelty reward for a given sentence.
@@ -45,7 +52,7 @@ class SelfBLEUScore(Metrics):
             new_references: list of strings, each string is a reference sentence to be added.
         """
         if tokenize:
-            new_references = [nltk.word_tokenize(ref) for ref in new_references]
+            new_references = [tokenize_text(ref) for ref in new_references]
         self.references.extend(new_references)
         if self._sample_size < 0 or len(self.references) <= self._sample_size:
             references = self.references
@@ -70,7 +77,7 @@ class SelfBLEUScore(Metrics):
             return torch.zeros(len(hypothesis))
 
         tokenized_hypothesis = (
-            [nltk.word_tokenize(hypo) for hypo in hypothesis]
+            [tokenize_text(hypo) for hypo in hypothesis]
             if tokenize
             else hypothesis
         )
@@ -219,3 +226,7 @@ class SampledSemanticDiversityScore(Metrics):
             self.update_references(embedded_hypothesis_norm, embed=False)
 
         return bcos_score
+
+
+# Backward-compatible name used by older configs/imports.
+TDiv = SampledSemanticDiversityScore

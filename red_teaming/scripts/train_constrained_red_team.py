@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 import os
 import time
@@ -27,6 +28,8 @@ from red_teaming.evaluation.metrics.utils import (
 )
 
 tqdm.pandas()
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass
@@ -61,6 +64,57 @@ class ScriptArguments:
     bfloat16: bool = field(default=False, metadata={"help": "whether to use bfloat16"})
 
 
+def resolve_path_or_repo_id(path_or_repo_id: Optional[str]):
+    if path_or_repo_id is None:
+        return path_or_repo_id, False
+
+    candidate = Path(path_or_repo_id).expanduser()
+    candidate_paths = [candidate]
+    if not candidate.is_absolute():
+        candidate_paths.append(PROJECT_ROOT / candidate)
+
+    for candidate_path in candidate_paths:
+        if candidate_path.exists():
+            return str(candidate_path.resolve()), True
+
+    return path_or_repo_id, False
+
+
+def resolve_dataset_paths(query_dataset: str) -> str:
+    dataset_paths = []
+    for dataset_path in query_dataset.split(","):
+        resolved_path, _ = resolve_path_or_repo_id(dataset_path)
+        dataset_paths.append(resolved_path)
+    return ",".join(dataset_paths)
+
+
+def resolve_blue_model_name(blue_model_name: str, red_model_name: str):
+    resolved_blue_model_name, blue_model_is_local = resolve_path_or_repo_id(
+        blue_model_name
+    )
+    if blue_model_is_local:
+        return resolved_blue_model_name, blue_model_is_local
+
+    default_blue_model_name = BlueConfig.__dataclass_fields__["blue_model_name"].default
+    if blue_model_name != default_blue_model_name:
+        return blue_model_name, False
+
+    local_blue_model_name, local_blue_is_local = resolve_path_or_repo_id(
+        str(Path("Models") / blue_model_name.rsplit("/", 1)[-1])
+    )
+    if local_blue_is_local:
+        return local_blue_model_name, True
+
+    resolved_red_model_name, red_model_is_local = resolve_path_or_repo_id(red_model_name)
+    if (
+        red_model_is_local
+        and Path(resolved_red_model_name).name == blue_model_name.rsplit("/", 1)[-1]
+    ):
+        return resolved_red_model_name, True
+
+    return blue_model_name, False
+
+
 def build_dataset(model_name: "str", query_dataset: "str"):
     """
     Build a dataset by loading and concatenating multiple datasets.
@@ -73,7 +127,11 @@ def build_dataset(model_name: "str", query_dataset: "str"):
         concatenated_ds (object): Concatenated dataset object.
     """
     dataset_paths = query_dataset.split(",")
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    resolved_model_name, model_is_local = resolve_path_or_repo_id(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(
+        resolved_model_name,
+        local_files_only=model_is_local,
+    )
     tokenizer.pad_token = tokenizer.eos_token
 
     # Load all datasets and store them in a list
@@ -121,6 +179,14 @@ if __name__ == "__main__":
     args, ppo_config, blue_config, evaluation_config = (
         parser.parse_args_into_dataclasses()
     )
+    ppo_config.model_name, red_model_is_local = resolve_path_or_repo_id(
+        ppo_config.model_name
+    )
+    blue_config.blue_model_name, blue_model_is_local = resolve_blue_model_name(
+        blue_config.blue_model_name,
+        ppo_config.model_name,
+    )
+    ppo_config.query_dataset = resolve_dataset_paths(ppo_config.query_dataset)
     # set the cost window to the size of the current batch size (only costs for current episodes)
     if ppo_config.episode_cost_window_size is None:
         ppo_config.episode_cost_window_size = ppo_config.batch_size
@@ -154,6 +220,7 @@ if __name__ == "__main__":
             ppo_config.model_name,
             cost_module_names=cost_module_names,
             trust_remote_code=args.trust_remote_code,
+            local_files_only=red_model_is_local,
             **dtype,
         )
         device_map = None
@@ -183,6 +250,7 @@ if __name__ == "__main__":
         device_map=device_map,
         peft_config=peft_config,
         summary_dropout_prob=args.summary_dropout_prob,
+        local_files_only=red_model_is_local,
         **ppo_config.red_team_model_config.model_kwargs,
         **dtype,
     )
@@ -192,7 +260,10 @@ if __name__ == "__main__":
             num_layers_unfrozen=ppo_config.red_team_model_config.num_layers_unfrozen,
         )
     disable_dropout_in_model(model)
-    tokenizer = AutoTokenizer.from_pretrained(ppo_config.model_name)
+    tokenizer = AutoTokenizer.from_pretrained(
+        ppo_config.model_name,
+        local_files_only=red_model_is_local,
+    )
 
     # setting up red generation config
     red_generation_config: GenerationConfig = setup_generation(
@@ -251,11 +322,15 @@ if __name__ == "__main__":
         blue_config.blue_model_name,
         trust_remote_code=args.trust_remote_code,
         device_map=device_map,
+        local_files_only=blue_model_is_local,
         **extra_blue_kwargs,
     )
     disable_dropout_in_model(blue_model)
     blue_model.eval().requires_grad_(False)
-    blue_tokenizer = AutoTokenizer.from_pretrained(blue_config.blue_model_name)
+    blue_tokenizer = AutoTokenizer.from_pretrained(
+        blue_config.blue_model_name,
+        local_files_only=blue_model_is_local,
+    )
     blue_tokenizer.padding_side = "left"
     blue_team.prepare_blue_team(
         accelerator=red_teaming_ppo_lagrangian_trainer.accelerator,

@@ -9,8 +9,14 @@ from trl.models import (
 
 from red_teaming.models.modeling_multi_value_heads import (
     AutoModelForCausalLMWithValueCostHeads,
-    AutoModelForSeq2SeqLMWithValueCostHeads,
 )
+
+try:
+    from red_teaming.models.modeling_multi_value_heads import (
+        AutoModelForSeq2SeqLMWithValueCostHeads,
+    )
+except ImportError:
+    AutoModelForSeq2SeqLMWithValueCostHeads = None
 
 # Freeze model tools from trlx
 
@@ -99,6 +105,11 @@ def freeze_bottom_causal_layers(model: PreTrainedModel, num_layers_unfrozen: int
 
 def get_model_cls(seq2seq: bool, cost_head: bool):
     if cost_head and seq2seq:
+        if AutoModelForSeq2SeqLMWithValueCostHeads is None:
+            raise ImportError(
+                "Seq2Seq value-cost heads are not available in "
+                "red_teaming.models.modeling_multi_value_heads"
+            )
         return AutoModelForSeq2SeqLMWithValueCostHeads
     if not cost_head and seq2seq:
         return AutoModelForSeq2SeqLMWithValueHead

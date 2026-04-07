@@ -1,4 +1,5 @@
 from typing import Optional, List, Callable, Union, Dict
+import os
 import time
 import numpy as np
 import warnings
@@ -46,6 +47,32 @@ from trl.models import (
     create_reference_model,
 )
 from trl.import_utils import is_npu_available, is_torch_greater_2_0, is_xpu_available
+
+
+def sanitize_tracker_config(config_dict: Dict):
+    sanitized_config = {}
+    for key, value in config_dict.items():
+        if isinstance(value, (int, float, str, bool, torch.Tensor)):
+            sanitized_config[key] = value
+        elif value is None:
+            sanitized_config[key] = "None"
+        else:
+            sanitized_config[key] = str(value)
+    return sanitized_config
+
+
+def sanitize_stats_dict(stats: Dict):
+    sanitized_stats = {}
+    for key, value in stats.items():
+        if isinstance(value, dict):
+            sanitized_stats[key] = sanitize_stats_dict(value)
+        elif isinstance(value, torch.Tensor):
+            sanitized_stats[key] = torch.nan_to_num(
+                value.detach(), nan=0.0, posinf=0.0, neginf=0.0
+            )
+        else:
+            sanitized_stats[key] = value
+    return sanitized_stats
 
 
 class RedTeamPPOTrainer(PPOTrainer):
@@ -107,10 +134,21 @@ class RedTeamPPOTrainer(PPOTrainer):
                 f"model must be a PreTrainedModelWrapper, got {type(model)} - supported architectures are: {SUPPORTED_ARCHITECTURES}"
             )
         # Step 1: Initialize Accelerator
+        project_kwargs = dict(config.project_kwargs)
+        if (
+            config.log_with is not None
+            and config.log_with == "tensorboard"
+            and project_kwargs.get("logging_dir") is None
+        ):
+            project_kwargs["logging_dir"] = os.path.join(
+                getattr(config, "log_train_path", "logs/train"), "tensorboard"
+            )
+            config.project_kwargs = project_kwargs
+
         self.accelerator = Accelerator(
             log_with=config.log_with,
             gradient_accumulation_steps=config.gradient_accumulation_steps,
-            project_config=ProjectConfiguration(**config.project_kwargs),
+            project_config=ProjectConfiguration(**project_kwargs),
             **config.accelerator_kwargs,
         )
 
@@ -122,11 +160,15 @@ class RedTeamPPOTrainer(PPOTrainer):
         config.global_batch_size = config.batch_size * config.world_size
 
         self.model = model
-        self.model_params = filter(lambda p: p.requires_grad, self.model.parameters())
+        self.model_params = tuple(
+            parameter for parameter in self.model.parameters() if parameter.requires_grad
+        )
         if critic is not None:
             self.critic = critic
-            self.critic_params = filter(
-                lambda p: p.requires_grad, self.critic.parameters()
+            self.critic_params = tuple(
+                parameter
+                for parameter in self.critic.parameters()
+                if parameter.requires_grad
             )
         self.is_encoder_decoder = hasattr(self.model, "is_encoder_decoder")
         self.is_peft_model = getattr(self.model, "is_peft_model", False)
@@ -137,13 +179,14 @@ class RedTeamPPOTrainer(PPOTrainer):
         is_using_tensorboard = (
             config.log_with is not None and config.log_with == "tensorboard"
         )
+        tracker_config = (
+            sanitize_tracker_config(config.to_dict())
+            if is_using_tensorboard
+            else dict(trl_ppo_trainer_config=config.to_dict())
+        )
         self.accelerator.init_trackers(
             config.tracker_project_name,
-            config=(
-                dict(trl_ppo_trainer_config=config.to_dict())
-                if not is_using_tensorboard
-                else config.to_dict()
-            ),
+            config=tracker_config,
             init_kwargs=config.tracker_kwargs,
             # init_kwargs={"wandb":{"settings": wandb.Settings(code_dir="."), "save_code": True}},
         )
@@ -876,6 +919,36 @@ class RedTeamPPOTrainer(PPOTrainer):
             )
         self.accelerator.wait_for_everyone()
 
+    def _sanitize_logits(
+        self, logits: torch.Tensor, context: str, clamp_value: float = 1.0e4
+    ) -> torch.Tensor:
+        if torch.isfinite(logits).all():
+            return logits
+        warnings.warn(
+            f"Non-finite logits detected during {context}; replacing NaN/Inf values before continuing."
+        )
+        return torch.nan_to_num(
+            logits,
+            nan=0.0,
+            posinf=clamp_value,
+            neginf=-clamp_value,
+        )
+
+    def _build_safe_generation_config(self, generation_kwargs: Dict) -> GenerationConfig:
+        safe_generation_kwargs = dict(generation_kwargs)
+        safe_generation_kwargs.setdefault("remove_invalid_values", True)
+        safe_generation_kwargs.setdefault("renormalize_logits", True)
+        return GenerationConfig(**safe_generation_kwargs)
+
+    def _has_non_finite_gradients(self) -> bool:
+        for parameter in self.model.parameters():
+            if parameter.grad is not None and not torch.isfinite(parameter.grad).all():
+                return True
+        return False
+
+    def _sanitize_train_stats(self, train_stats: Dict) -> Dict:
+        return sanitize_stats_dict(train_stats)
+
     def _generate_batched(
         self,
         model: PreTrainedModelWrapper,
@@ -917,7 +990,7 @@ class RedTeamPPOTrainer(PPOTrainer):
 
             generations = self.accelerator.unwrap_model(model).generate(
                 **padded_inputs,
-                generation_config=GenerationConfig(**generation_kwargs),
+                generation_config=self._build_safe_generation_config(generation_kwargs),
             )
 
             for generation, mask in zip(generations, padded_inputs["attention_mask"]):
@@ -988,6 +1061,7 @@ class RedTeamPPOTrainer(PPOTrainer):
             logits, _, values = model(**input_kwargs)
             if self.config.scale_logits:
                 logits = logits / self.config.red_generation_kwargs["temperature"]
+            logits = self._sanitize_logits(logits, "batched_forward_pass")
 
             if self.is_encoder_decoder:
                 input_ids = input_kwargs["decoder_input_ids"]
@@ -1075,15 +1149,33 @@ class RedTeamPPOTrainer(PPOTrainer):
             old_logprobs, values, logits, vpreds, logprobs, mask, advantages, returns
         )
         loss = loss_p + loss_v
+        if not torch.isfinite(loss):
+            warnings.warn(
+                "Skipping PPO minibatch because the combined loss became non-finite."
+            )
+            self.optimizer.zero_grad()
+            return self._sanitize_train_stats(train_stats)
         self.accelerator.backward(loss)
+        if self._has_non_finite_gradients():
+            warnings.warn(
+                "Skipping PPO minibatch because non-finite gradients were detected."
+            )
+            self.optimizer.zero_grad()
+            return self._sanitize_train_stats(train_stats)
         if self.config.max_grad_norm is not None:
             if self.accelerator.sync_gradients:
                 self.accelerator.clip_grad_norm_(
                     self.model_params,
                     self.config.max_grad_norm,
                 )
+                if self._has_non_finite_gradients():
+                    warnings.warn(
+                        "Skipping PPO minibatch because gradient clipping produced non-finite gradients."
+                    )
+                    self.optimizer.zero_grad()
+                    return self._sanitize_train_stats(train_stats)
         self.optimizer.step()
         # we call optimizer.zero_grad() every time and let `accelerator` handle accumulation
         # see https://huggingface.co/docs/accelerate/usage_guides/gradient_accumulation#the-finished-code
         self.optimizer.zero_grad()
-        return train_stats
+        return self._sanitize_train_stats(train_stats)

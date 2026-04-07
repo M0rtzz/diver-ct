@@ -356,9 +356,11 @@ class BlueTeamEnvironment(gym.Env):
             skip_special_tokens=True,
         )
         self.system_message_length = len(non_special_blue_prompt) - temp_instruction_len
-        self.filter_add_threshold = self.config.blue_filter_add_threshold
-        self.blue_filter_start_num = self.config.blue_filter_start_num
-        self.filter_reverse = self.config.blue_filter_reverse
+        self.filter_add_threshold = getattr(
+            self.config, "blue_filter_add_threshold", 0.0
+        )
+        self.blue_filter_start_num = getattr(self.config, "blue_filter_start_num", 0)
+        self.filter_reverse = getattr(self.config, "blue_filter_reverse", False)
         self.num_toxic = 0
 
     def render(self, mode: "str" = "human") -> str:

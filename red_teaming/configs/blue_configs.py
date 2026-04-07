@@ -163,6 +163,18 @@ class BlueConfig(BaseConfig):
     save_memory: Optional[bool] = field(
         default=False, metadata={"help": "The save memory for blue team"}
     )
+    blue_filter_add_threshold: float = field(
+        default=0.0,
+        metadata={"help": "Compatibility field for legacy blue-team filtering."},
+    )
+    blue_filter_start_num: int = field(
+        default=0,
+        metadata={"help": "Compatibility field for legacy blue-team filtering."},
+    )
+    blue_filter_reverse: bool = field(
+        default=False,
+        metadata={"help": "Compatibility field for legacy blue-team filtering."},
+    )
 
     # cost and reward configuration
     blue_safety_reward: bool = field(

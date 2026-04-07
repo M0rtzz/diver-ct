@@ -118,7 +118,7 @@ def get_utility_modules(
                 _coef=utility_dict.coef,
                 team=utility_dict.team,
                 device=device,
-                clip_value=utility_dict.clip_value,
+                clip_value=getattr(utility_dict, "clip_value", None),
             )
             # Add dynamic reward parameters
             if hasattr(utility_dict, "is_dynamic"):
@@ -140,6 +140,7 @@ def get_utility_modules(
                 name=utility_name,
                 constraint=utility_dict.threshold,
                 team=utility_dict.team,
+                clip_value=getattr(utility_dict, "clip_value", None),
                 device=device,
                 transform=utility_dict.transformation,
             )
